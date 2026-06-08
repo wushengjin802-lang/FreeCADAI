@@ -113,3 +113,29 @@ Authorization: Bearer <FREECADAI_ADMIN_TOKEN>
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/api/v1/plugin/templates` | 插件拉取云端模板 |
+
+## 阶段 10 数据库迁移
+
+阶段 10 开始，后端使用 Alembic 管理数据库结构。
+
+常用命令：
+
+```powershell
+python -m alembic -c server/alembic.ini upgrade head
+python -m alembic -c server/alembic.ini current
+python -m alembic -c server/alembic.ini history
+```
+
+应用启动时默认会自动执行迁移：
+
+```text
+FREECADAI_AUTO_MIGRATE=1
+```
+
+如果生产环境希望手动控制迁移，可以关闭自动迁移：
+
+```text
+FREECADAI_AUTO_MIGRATE=0
+```
+
+已有线上库如果已经存在业务表但没有 `alembic_version`，应用会先执行 `stamp head`，把当前结构标记为基线版本，避免重复建表。

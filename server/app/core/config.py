@@ -28,6 +28,7 @@ class Settings:
     admin_username = os.getenv("FREECADAI_ADMIN_USERNAME", "admin")
     admin_password = os.getenv("FREECADAI_ADMIN_PASSWORD", admin_token)
     admin_session_hours = int(os.getenv("FREECADAI_ADMIN_SESSION_HOURS", "12"))
+    auto_migrate = os.getenv("FREECADAI_AUTO_MIGRATE", "1").lower() in {"1", "true", "yes", "on"}
 
 
 settings = Settings()

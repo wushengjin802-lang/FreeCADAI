@@ -10,8 +10,8 @@ from server.app.api.admin import router as admin_router
 from server.app.api.plugin import router as plugin_router
 from server.app.core.config import settings
 from server.app.core.redis import redis_ping
-from server.app.db.base import Base
-from server.app.db.session import SessionLocal, engine
+from server.app.db.migrations import migrate_database
+from server.app.db.session import SessionLocal
 from server.app.services.auth import ensure_default_admin
 
 # Import models so create_all can discover them in the phase 4 prototype.
@@ -50,7 +50,8 @@ def admin_page():
 
 @app.on_event("startup")
 def startup():
-    Base.metadata.create_all(bind=engine)
+    if settings.auto_migrate:
+        migrate_database()
     db = SessionLocal()
     try:
         ensure_default_admin(db)
