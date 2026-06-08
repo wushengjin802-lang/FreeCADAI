@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FreeCADAI 管理后台</title>
+  <style>
+    :root {
+      --ink: #17201b;
+      --muted: #657169;
+      --line: #d8dfd9;
+      --paper: #f7f6f1;
+      --panel: #ffffff;
+      --steel: #344b5a;
+      --green: #177245;
+      --amber: #a45f16;
+      --red: #a23b3b;
+      --blue: #245d8f;
+      --shadow: 0 18px 46px rgba(28, 42, 34, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(52, 75, 90, 0.08) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(52, 75, 90, 0.06) 1px, transparent 1px),
+        var(--paper);
+      background-size: 32px 32px;
+      font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    aside {
+      background: #1f2b2a;
+      color: #eef3ec;
+      padding: 22px 16px;
+      border-right: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .brand {
+      padding: 0 6px 20px;
+      border-bottom: 1px solid rgba(255,255,255,0.12);
+      margin-bottom: 18px;
+    }
+
+    .brand strong {
+      display: block;
+      font-size: 18px;
+      margin-bottom: 6px;
+    }
+
+    .brand span {
+      display: block;
+      color: #aebbb3;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    nav button {
+      width: 100%;
+      height: 38px;
+      border: 0;
+      border-radius: 6px;
+      margin: 4px 0;
+      padding: 0 12px;
+      text-align: left;
+      color: #dfe8e0;
+      background: transparent;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    nav button.active,
+    nav button:hover {
+      background: #30433e;
+      color: #ffffff;
+    }
+
+    main { padding: 24px; }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 380px;
+      gap: 16px;
+      align-items: end;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .sub {
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    .auth {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 82px;
+      gap: 8px;
+      background: rgba(255,255,255,0.72);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      padding: 9px 10px;
+      font: inherit;
+      min-height: 38px;
+    }
+
+    textarea {
+      min-height: 132px;
+      resize: vertical;
+      line-height: 1.55;
+    }
+
+    button.primary, button.secondary, button.danger {
+      border: 0;
+      border-radius: 6px;
+      min-height: 38px;
+      padding: 0 13px;
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+      white-space: nowrap;
+    }
+
+    button.primary { background: var(--green); }
+    button.secondary { background: var(--steel); }
+    button.danger { background: var(--red); }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    .grid4 {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .metric, .panel {
+      background: rgba(255,255,255,0.86);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .metric { padding: 16px; }
+    .metric span {
+      color: var(--muted);
+      display: block;
+      margin-bottom: 8px;
+    }
+    .metric strong { font-size: 26px; }
+
+    .panel { margin-bottom: 16px; overflow: hidden; }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(247, 246, 241, 0.78);
+    }
+    .panel-head h2 {
+      margin: 0;
+      font-size: 16px;
+    }
+    .panel-body { padding: 16px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      font-weight: 600;
+      background: #fbfaf6;
+    }
+    tbody tr:hover { background: #fbfaf6; }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 99px;
+      color: #fff;
+      font-size: 12px;
+      background: var(--steel);
+    }
+    .pill.succeeded { background: var(--green); }
+    .pill.failed { background: var(--red); }
+    .pill.running { background: var(--amber); }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 160px 120px;
+      gap: 10px;
+      align-items: start;
+      margin-bottom: 10px;
+    }
+
+    .row-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    pre {
+      white-space: pre-wrap;
+      overflow: auto;
+      max-height: 340px;
+      margin: 0;
+      padding: 12px;
+      background: #17201b;
+      color: #eaf2e9;
+      border-radius: 6px;
+      line-height: 1.55;
+    }
+
+    .hidden { display: none; }
+    .muted { color: var(--muted); }
+    .error { color: var(--red); }
+    .ok { color: var(--green); }
+
+    @media (max-width: 920px) {
+      .shell { grid-template-columns: 1fr; }
+      aside { position: static; }
+      .topbar, .grid4, .form-grid { grid-template-columns: 1fr; }
+      main { padding: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <div class="brand">
+        <strong>FreeCADAI</strong>
+        <span>SaaS 控制台<br />任务、模板、密钥和用量</span>
+      </div>
+      <nav>
+        <button class="active" data-view="dashboard">总览</button>
+        <button data-view="tasks">任务历史</button>
+        <button data-view="templates">模板库</button>
+        <button data-view="keys">API Key</button>
+      </nav>
+    </aside>
+
+    <main>
+      <div class="topbar">
+        <div>
+          <h1 id="pageTitle">总览</h1>
+          <div class="sub">连接到当前 FreeCADAI SaaS 服务实例。</div>
+        </div>
+        <div class="auth">
+          <input id="tokenInput" type="password" placeholder="Admin Token" />
+          <button class="secondary" id="saveToken">保存</button>
+        </div>
+      </div>
+
+      <section id="dashboard" class="view">
+        <div class="grid4">
+          <div class="metric"><span>任务总数</span><strong id="metricTasks">0</strong></div>
+          <div class="metric"><span>成功任务</span><strong id="metricSucceeded">0</strong></div>
+          <div class="metric"><span>失败任务</span><strong id="metricFailed">0</strong></div>
+          <div class="metric"><span>执行回传</span><strong id="metricReports">0</strong></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>服务状态</h2>
+            <button class="secondary" onclick="refreshAll()">刷新</button>
+          </div>
+          <div class="panel-body">
+            <div id="healthText" class="muted">等待刷新。</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tasks" class="view hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>任务历史</h2>
+            <button class="secondary" onclick="loadTasks()">刷新</button>
+          </div>
+          <table>
+            <thead>
+              <tr><th>ID</th><th>状态</th><th>动作</th><th>模式</th><th>模型</th><th>需求</th><th>创建时间</th></tr>
+            </thead>
+            <tbody id="taskRows"></tbody>
+          </table>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>任务详情</h2></div>
+          <div class="panel-body"><pre id="taskDetail">点击任务行查看详情。</pre></div>
+        </div>
+      </section>
+
+      <section id="templates" class="view hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>新增模板</h2>
+            <button class="primary" onclick="createTemplate()">保存模板</button>
+          </div>
+          <div class="panel-body">
+            <div class="form-grid">
+              <input id="tplName" placeholder="模板名称" />
+              <input id="tplCategory" placeholder="分类" value="common" />
+              <select id="tplEnabled"><option value="true">启用</option><option value="false">停用</option></select>
+            </div>
+            <textarea id="tplPrompt" placeholder="模板 Prompt"></textarea>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>模板列表</h2>
+            <button class="secondary" onclick="loadTemplates()">刷新</button>
+          </div>
+          <table>
+            <thead><tr><th>ID</th><th>名称</th><th>分类</th><th>状态</th><th>Prompt</th><th>操作</th></tr></thead>
+            <tbody id="templateRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="keys" class="view hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>创建插件 API Key</h2>
+            <button class="primary" onclick="createApiKey()">创建</button>
+          </div>
+          <div class="panel-body">
+            <div class="form-grid">
+              <input id="keyName" placeholder="名称" value="Plugin Key" />
+              <input id="workspaceId" type="number" placeholder="Workspace ID" value="1" />
+              <div></div>
+            </div>
+            <pre id="keyResult">新 Key 只会在创建后显示一次。</pre>
+          </div>
+        </div>
+      </section>
+
+      <div id="message" class="muted"></div>
+    </main>
+  </div>
+
+  <script>
+    const prefix = location.pathname.split('/admin')[0] || '';
+    const adminBase = `${prefix}/api/v1/admin`;
+    const healthUrl = `${prefix}/health`;
+    const tokenInput = document.getElementById('tokenInput');
+    const savedToken = localStorage.getItem('freecadai_admin_token') || '';
+    tokenInput.value = savedToken;
+
+    document.getElementById('saveToken').onclick = () => {
+      localStorage.setItem('freecadai_admin_token', tokenInput.value.trim());
+      showMessage('Admin Token 已保存。', true);
+      refreshAll();
+    };
+
+    document.querySelectorAll('nav button').forEach(button => {
+      button.onclick = () => {
+        document.querySelectorAll('nav button').forEach(item => item.classList.remove('active'));
+        document.querySelectorAll('.view').forEach(item => item.classList.add('hidden'));
+        button.classList.add('active');
+        document.getElementById(button.dataset.view).classList.remove('hidden');
+        document.getElementById('pageTitle').textContent = button.textContent;
+      };
+    });
+
+    function headers() {
+      return {
+        'Authorization': `Bearer ${tokenInput.value.trim()}`,
+        'Content-Type': 'application/json'
+      };
+    }
+
+    function showMessage(text, good = false) {
+      const el = document.getElementById('message');
+      el.textContent = text;
+      el.className = good ? 'ok' : 'error';
+    }
+
+    async function api(path, options = {}) {
+      const response = await fetch(`${adminBase}${path}`, {
+        ...options,
+        headers: { ...headers(), ...(options.headers || {}) }
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || response.statusText);
+      }
+      return response.json();
+    }
+
+    async function loadHealth() {
+      const response = await fetch(healthUrl);
+      const data = await response.json();
+      document.getElementById('healthText').textContent =
+        `服务：${data.service} | Redis：${data.redis ? '正常' : '异常'}`;
+    }
+
+    async function loadUsage() {
+      const data = await api('/usage');
+      document.getElementById('metricTasks').textContent = data.task_count;
+      document.getElementById('metricSucceeded').textContent = data.succeeded_count;
+      document.getElementById('metricFailed').textContent = data.failed_count;
+      document.getElementById('metricReports').textContent = data.report_count;
+    }
+
+    async function loadTasks() {
+      const rows = await api('/tasks?limit=80');
+      const body = document.getElementById('taskRows');
+      body.innerHTML = rows.map(row => `
+        <tr onclick="loadTaskDetail(${row.id})">
+          <td>${row.id}</td>
+          <td><span class="pill ${row.status}">${row.status}</span></td>
+          <td>${row.action}</td>
+          <td>${row.modeling_mode}</td>
+          <td>${row.model}</td>
+          <td>${escapeHtml(row.prompt).slice(0, 120)}</td>
+          <td>${row.created_at}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="7" class="muted">暂无任务。</td></tr>';
+    }
+
+    async function loadTaskDetail(id) {
+      const data = await api(`/tasks/${id}`);
+      document.getElementById('taskDetail').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function loadTemplates() {
+      const rows = await api('/templates?include_disabled=true');
+      const body = document.getElementById('templateRows');
+      body.innerHTML = rows.map(row => `
+        <tr>
+          <td>${row.id}</td>
+          <td>${escapeHtml(row.name)}</td>
+          <td>${escapeHtml(row.category)}</td>
+          <td>${row.enabled ? '启用' : '停用'}</td>
+          <td>${escapeHtml(row.prompt).slice(0, 150)}</td>
+          <td class="row-actions">
+            <button class="secondary" onclick="toggleTemplate(${row.id}, ${!row.enabled})">${row.enabled ? '停用' : '启用'}</button>
+            <button class="danger" onclick="deleteTemplate(${row.id})">删除</button>
+          </td>
+        </tr>
+      `).join('') || '<tr><td colspan="6" class="muted">暂无云端模板。</td></tr>';
+    }
+
+    async function createTemplate() {
+      await api('/templates', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: document.getElementById('tplName').value.trim(),
+          category: document.getElementById('tplCategory').value.trim() || 'common',
+          prompt: document.getElementById('tplPrompt').value.trim(),
+          enabled: document.getElementById('tplEnabled').value === 'true'
+        })
+      });
+      showMessage('模板已保存。', true);
+      document.getElementById('tplName').value = '';
+      document.getElementById('tplPrompt').value = '';
+      await loadTemplates();
+    }
+
+    async function toggleTemplate(id, enabled) {
+      await api(`/templates/${id}`, { method: 'PUT', body: JSON.stringify({ enabled }) });
+      await loadTemplates();
+    }
+
+    async function deleteTemplate(id) {
+      if (!confirm('确认删除这个模板？')) return;
+      await api(`/templates/${id}`, { method: 'DELETE' });
+      await loadTemplates();
+    }
+
+    async function createApiKey() {
+      const data = await api('/api-keys', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: document.getElementById('keyName').value.trim() || 'Plugin Key',
+          workspace_id: Number(document.getElementById('workspaceId').value || 1)
+        })
+      });
+      document.getElementById('keyResult').textContent = JSON.stringify(data, null, 2);
+    }
+
+    function escapeHtml(value) {
+      return String(value || '').replace(/[&<>"']/g, char => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+      }[char]));
+    }
+
+    async function refreshAll() {
+      try {
+        await loadHealth();
+        if (tokenInput.value.trim()) {
+          await Promise.all([loadUsage(), loadTasks(), loadTemplates()]);
+          showMessage('数据已刷新。', true);
+        }
+      } catch (error) {
+        showMessage(error.message);
+      }
+    }
+
+    refreshAll();
+  </script>
+</body>
+</html>

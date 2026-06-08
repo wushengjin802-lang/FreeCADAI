@@ -101,6 +101,13 @@ SaaS API Key: dev-plugin-key
 重启策略：unless-stopped
 ```
 
+Web 管理后台：
+
+```text
+地址：http://119.29.16.170/freecadai/admin
+默认 Admin Token：dev-admin-token
+```
+
 ## 二维草图
 
 如果要生成二维草图：
