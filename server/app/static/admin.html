@@ -15,7 +15,6 @@
       --green: #177245;
       --amber: #a45f16;
       --red: #a23b3b;
-      --blue: #245d8f;
       --shadow: 0 14px 34px rgba(28, 42, 34, 0.1);
     }
 
@@ -88,7 +87,7 @@
 
     .topbar {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 380px;
+      grid-template-columns: minmax(0, 1fr) 520px;
       gap: 16px;
       align-items: end;
       margin-bottom: 18px;
@@ -107,7 +106,7 @@
 
     .auth {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 82px;
+      grid-template-columns: minmax(0, 1fr) 150px 82px;
       gap: 8px;
       background: rgba(255,255,255,0.72);
       border: 1px solid var(--line);
@@ -127,7 +126,7 @@
     }
 
     textarea {
-      min-height: 132px;
+      min-height: 126px;
       resize: vertical;
       line-height: 1.55;
     }
@@ -223,12 +222,12 @@
       background: var(--steel);
     }
     .pill.succeeded, .pill.active { background: var(--green); }
-    .pill.failed, .pill.revoked { background: var(--red); }
+    .pill.failed, .pill.revoked, .pill.suspended { background: var(--red); }
     .pill.running { background: var(--amber); }
 
     .form-grid {
       display: grid;
-      grid-template-columns: 1fr 160px 120px;
+      grid-template-columns: 1fr 150px 130px;
       gap: 10px;
       align-items: start;
       margin-bottom: 10px;
@@ -266,10 +265,10 @@
     .error { color: var(--red); }
     .ok { color: var(--green); }
 
-    @media (max-width: 1080px) {
+    @media (max-width: 1120px) {
       .shell { grid-template-columns: 1fr; }
       aside { position: static; }
-      .topbar, .grid4, .form-grid, .filters { grid-template-columns: 1fr; }
+      .topbar, .auth, .grid4, .form-grid, .filters { grid-template-columns: 1fr; }
       main { padding: 14px; }
     }
   </style>
@@ -279,13 +278,15 @@
     <aside>
       <div class="brand">
         <strong>FreeCADAI</strong>
-        <span>SaaS 控制台<br />任务、模板、密钥和用量</span>
+        <span>SaaS 控制台<br />工作区、任务、模板、密钥和审计</span>
       </div>
       <nav>
         <button class="active" data-view="dashboard">总览</button>
+        <button data-view="workspaces">工作区</button>
         <button data-view="tasks">任务历史</button>
         <button data-view="templates">模板库</button>
         <button data-view="keys">API Key</button>
+        <button data-view="audit">审计日志</button>
       </nav>
     </aside>
 
@@ -297,6 +298,7 @@
         </div>
         <div class="auth">
           <input id="tokenInput" type="password" placeholder="Admin Token" />
+          <select id="workspaceFilter"><option value="">全部工作区</option></select>
           <button class="secondary" id="saveToken">保存</button>
         </div>
       </div>
@@ -329,6 +331,32 @@
         </div>
       </section>
 
+      <section id="workspaces" class="view hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>创建工作区</h2>
+            <button class="primary" onclick="createWorkspace()">创建</button>
+          </div>
+          <div class="panel-body">
+            <div class="form-grid">
+              <input id="workspaceName" placeholder="工作区名称" />
+              <select id="workspacePlan"><option value="free">free</option><option value="pro">pro</option><option value="team">team</option></select>
+              <select id="workspaceStatus"><option value="active">active</option><option value="suspended">suspended</option></select>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>工作区列表</h2>
+            <button class="secondary" onclick="loadWorkspaces()">刷新</button>
+          </div>
+          <table>
+            <thead><tr><th>ID</th><th>名称</th><th>套餐</th><th>状态</th><th>Key 数</th><th>任务数</th><th>创建时间</th><th>操作</th></tr></thead>
+            <tbody id="workspaceRows"></tbody>
+          </table>
+        </div>
+      </section>
+
       <section id="tasks" class="view hidden">
         <div class="panel">
           <div class="panel-head">
@@ -346,8 +374,8 @@
             <select id="taskAction">
               <option value="">全部动作</option>
               <option value="generate">生成</option>
-              <option value="fix">修复</option>
-              <option value="modify">修改</option>
+              <option value="repair">修复</option>
+              <option value="regenerate">重生成</option>
             </select>
             <select id="taskMode">
               <option value="">全部模式</option>
@@ -360,7 +388,7 @@
           </div>
           <table>
             <thead>
-              <tr><th>ID</th><th>状态</th><th>动作</th><th>模式</th><th>模型</th><th>需求</th><th>创建时间</th></tr>
+              <tr><th>ID</th><th>工作区</th><th>状态</th><th>动作</th><th>模式</th><th>模型</th><th>需求</th><th>创建时间</th></tr>
             </thead>
             <tbody id="taskRows"></tbody>
           </table>
@@ -411,7 +439,7 @@
             </div>
           </div>
           <table>
-            <thead><tr><th>ID</th><th>名称</th><th>分类</th><th>状态</th><th>Prompt</th><th>操作</th></tr></thead>
+            <thead><tr><th>ID</th><th>工作区</th><th>名称</th><th>分类</th><th>状态</th><th>Prompt</th><th>操作</th></tr></thead>
             <tbody id="templateRows"></tbody>
           </table>
         </div>
@@ -444,6 +472,19 @@
         </div>
       </section>
 
+      <section id="audit" class="view hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>审计日志</h2>
+            <button class="secondary" onclick="loadAuditLogs()">刷新</button>
+          </div>
+          <table>
+            <thead><tr><th>ID</th><th>时间</th><th>操作者</th><th>动作</th><th>对象</th><th>工作区</th><th>详情</th></tr></thead>
+            <tbody id="auditRows"></tbody>
+          </table>
+        </div>
+      </section>
+
       <div id="message" class="muted"></div>
     </main>
   </div>
@@ -453,6 +494,7 @@
     const adminBase = `${prefix}/api/v1/admin`;
     const healthUrl = `${prefix}/health`;
     const tokenInput = document.getElementById('tokenInput');
+    const workspaceFilter = document.getElementById('workspaceFilter');
     const savedToken = localStorage.getItem('freecadai_admin_token') || '';
     let taskOffset = 0;
     const taskLimit = 50;
@@ -461,6 +503,11 @@
     document.getElementById('saveToken').onclick = () => {
       localStorage.setItem('freecadai_admin_token', tokenInput.value.trim());
       showMessage('Admin Token 已保存。', true);
+      refreshAll();
+    };
+
+    workspaceFilter.onchange = () => {
+      resetTaskPage();
       refreshAll();
     };
 
@@ -479,6 +526,17 @@
         'Authorization': `Bearer ${tokenInput.value.trim()}`,
         'Content-Type': 'application/json'
       };
+    }
+
+    function selectedWorkspaceId() {
+      return workspaceFilter.value ? Number(workspaceFilter.value) : null;
+    }
+
+    function scopedPath(path) {
+      const workspaceId = selectedWorkspaceId();
+      if (!workspaceId) return path;
+      const joiner = path.includes('?') ? '&' : '?';
+      return `${path}${joiner}workspace_id=${workspaceId}`;
     }
 
     function showMessage(text, good = false) {
@@ -508,7 +566,8 @@
         status: document.getElementById('taskStatus').value,
         action: document.getElementById('taskAction').value,
         modeling_mode: document.getElementById('taskMode').value,
-        q: document.getElementById('taskSearch').value.trim()
+        q: document.getElementById('taskSearch').value.trim(),
+        workspace_id: selectedWorkspaceId()
       };
       Object.entries(values).forEach(([key, value]) => {
         if (value) params.set(key, value);
@@ -523,8 +582,52 @@
         `服务：${data.service} | Redis：${data.redis ? '正常' : '异常'}`;
     }
 
+    async function loadWorkspaces() {
+      const rows = await api('/workspaces');
+      const selected = workspaceFilter.value;
+      workspaceFilter.innerHTML = '<option value="">全部工作区</option>' + rows.map(row =>
+        `<option value="${row.id}">${row.id} ${escapeHtml(row.name)}</option>`
+      ).join('');
+      workspaceFilter.value = selected;
+      const body = document.getElementById('workspaceRows');
+      body.innerHTML = rows.map(row => `
+        <tr>
+          <td>${row.id}</td>
+          <td>${escapeHtml(row.name)}</td>
+          <td>${escapeHtml(row.plan)}</td>
+          <td><span class="pill ${row.status}">${row.status}</span></td>
+          <td>${row.api_key_count}</td>
+          <td>${row.task_count}</td>
+          <td>${row.created_at}</td>
+          <td class="row-actions">
+            <button class="secondary" onclick="setWorkspaceStatus(${row.id}, '${row.status === 'active' ? 'suspended' : 'active'}')">${row.status === 'active' ? '停用' : '启用'}</button>
+          </td>
+        </tr>
+      `).join('') || '<tr><td colspan="8" class="muted">暂无工作区。</td></tr>';
+    }
+
+    async function createWorkspace() {
+      const data = await api('/workspaces', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: document.getElementById('workspaceName').value.trim(),
+          plan: document.getElementById('workspacePlan').value,
+          status: document.getElementById('workspaceStatus').value
+        })
+      });
+      document.getElementById('workspaceName').value = '';
+      showMessage(`工作区 ${data.id} 已创建。`, true);
+      await loadWorkspaces();
+    }
+
+    async function setWorkspaceStatus(id, status) {
+      await api(`/workspaces/${id}`, { method: 'PUT', body: JSON.stringify({ status }) });
+      showMessage('工作区状态已更新。', true);
+      await loadWorkspaces();
+    }
+
     async function loadUsage() {
-      const data = await api('/usage');
+      const data = await api(scopedPath('/usage'));
       document.getElementById('metricTasks').textContent = data.task_count;
       document.getElementById('metricSucceeded').textContent = data.succeeded_count;
       document.getElementById('metricFailed').textContent = data.failed_count;
@@ -532,7 +635,7 @@
     }
 
     async function loadUsageTrend() {
-      const rows = await api('/usage/daily?days=14');
+      const rows = await api(scopedPath('/usage/daily?days=14'));
       const body = document.getElementById('trendRows');
       body.innerHTML = rows.map(row => `
         <tr>
@@ -551,6 +654,7 @@
       body.innerHTML = rows.map(row => `
         <tr onclick="loadTaskDetail(${row.id})">
           <td>${row.id}</td>
+          <td>${row.workspace_id}</td>
           <td><span class="pill ${row.status}">${row.status}</span></td>
           <td>${row.action}</td>
           <td>${row.modeling_mode}</td>
@@ -558,7 +662,7 @@
           <td>${escapeHtml(row.prompt).slice(0, 120)}</td>
           <td>${row.created_at}</td>
         </tr>
-      `).join('') || '<tr><td colspan="7" class="muted">暂无任务。</td></tr>';
+      `).join('') || '<tr><td colspan="8" class="muted">暂无任务。</td></tr>';
       document.getElementById('taskPager').textContent = `第 ${Math.floor(taskOffset / taskLimit) + 1} 页，当前 ${rows.length} 条`;
     }
 
@@ -591,11 +695,12 @@
     }
 
     async function loadTemplates() {
-      const rows = await api('/templates?include_disabled=true');
+      const rows = await api(scopedPath('/templates?include_disabled=true'));
       const body = document.getElementById('templateRows');
       body.innerHTML = rows.map(row => `
         <tr>
           <td>${row.id}</td>
+          <td>${row.workspace_id || '全局'}</td>
           <td>${escapeHtml(row.name)}</td>
           <td>${escapeHtml(row.category)}</td>
           <td>${row.enabled ? '启用' : '停用'}</td>
@@ -605,13 +710,14 @@
             <button class="danger" onclick="deleteTemplate(${row.id})">删除</button>
           </td>
         </tr>
-      `).join('') || '<tr><td colspan="6" class="muted">暂无云端模板。</td></tr>';
+      `).join('') || '<tr><td colspan="7" class="muted">暂无云端模板。</td></tr>';
     }
 
     async function createTemplate() {
       await api('/templates', {
         method: 'POST',
         body: JSON.stringify({
+          workspace_id: selectedWorkspaceId(),
           name: document.getElementById('tplName').value.trim(),
           category: document.getElementById('tplCategory').value.trim() || 'common',
           prompt: document.getElementById('tplPrompt').value.trim(),
@@ -636,7 +742,7 @@
     }
 
     async function exportTemplates() {
-      const rows = await api('/templates/export');
+      const rows = await api(scopedPath('/templates/export'));
       downloadBlob(new Blob([JSON.stringify({ templates: rows }, null, 2)], { type: 'application/json;charset=utf-8' }), 'freecadai_templates.json');
       showMessage('模板 JSON 已导出。', true);
     }
@@ -645,25 +751,29 @@
       const text = document.getElementById('tplImport').value.trim();
       const data = JSON.parse(text);
       const payload = Array.isArray(data) ? { templates: data } : data;
+      if (selectedWorkspaceId()) {
+        payload.templates = payload.templates.map(item => ({ ...item, workspace_id: selectedWorkspaceId() }));
+      }
       await api('/templates/import', { method: 'POST', body: JSON.stringify(payload) });
       showMessage('模板已导入。', true);
       await loadTemplates();
     }
 
     async function createApiKey() {
+      const workspaceId = Number(document.getElementById('workspaceId').value || selectedWorkspaceId() || 1);
       const data = await api('/api-keys', {
         method: 'POST',
         body: JSON.stringify({
           name: document.getElementById('keyName').value.trim() || 'Plugin Key',
-          workspace_id: Number(document.getElementById('workspaceId').value || 1)
+          workspace_id: workspaceId
         })
       });
       document.getElementById('keyResult').textContent = JSON.stringify(data, null, 2);
-      await loadKeys();
+      await Promise.all([loadKeys(), loadWorkspaces()]);
     }
 
     async function loadKeys() {
-      const rows = await api('/api-keys');
+      const rows = await api(scopedPath('/api-keys'));
       const body = document.getElementById('keyRows');
       body.innerHTML = rows.map(row => `
         <tr>
@@ -695,6 +805,22 @@
       await loadKeys();
     }
 
+    async function loadAuditLogs() {
+      const rows = await api(scopedPath('/audit-logs?limit=100'));
+      const body = document.getElementById('auditRows');
+      body.innerHTML = rows.map(row => `
+        <tr>
+          <td>${row.id}</td>
+          <td>${row.created_at}</td>
+          <td>${escapeHtml(row.actor)}</td>
+          <td>${escapeHtml(row.action)}</td>
+          <td>${escapeHtml(row.target_type)} #${escapeHtml(row.target_id)}</td>
+          <td>${row.workspace_id || '-'}</td>
+          <td>${escapeHtml(JSON.stringify(row.metadata || {})).slice(0, 180)}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="7" class="muted">暂无审计日志。</td></tr>';
+    }
+
     function downloadBlob(blob, filename) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -716,7 +842,8 @@
       try {
         await loadHealth();
         if (tokenInput.value.trim()) {
-          await Promise.all([loadUsage(), loadUsageTrend(), loadTasks(), loadTemplates(), loadKeys()]);
+          await loadWorkspaces();
+          await Promise.all([loadUsage(), loadUsageTrend(), loadTasks(), loadTemplates(), loadKeys(), loadAuditLogs()]);
           showMessage('数据已刷新。', true);
         }
       } catch (error) {

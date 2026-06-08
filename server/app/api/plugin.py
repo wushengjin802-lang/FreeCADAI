@@ -3,7 +3,7 @@
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from freecad_ai.templates import TEMPLATES
@@ -50,7 +50,12 @@ def plugin_templates(
     workspace=Depends(authenticate_plugin),
 ):
     rows = db.execute(
-        select(Template).where(Template.enabled.is_(True)).order_by(Template.category, Template.name)
+        select(Template)
+        .where(
+            Template.enabled.is_(True),
+            or_(Template.workspace_id.is_(None), Template.workspace_id == workspace.id),
+        )
+        .order_by(Template.category, Template.name)
     ).scalars().all()
     if rows:
         return PluginTemplatesResponse(

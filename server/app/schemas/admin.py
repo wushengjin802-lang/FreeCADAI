@@ -22,6 +22,7 @@ class TemplateUpdate(BaseModel):
 
 class TemplateOut(BaseModel):
     id: int
+    workspace_id: Optional[int] = None
     name: str
     category: str
     prompt: str
@@ -85,3 +86,36 @@ class UsageDailyItem(BaseModel):
     succeeded_count: int
     failed_count: int
     report_count: int
+
+
+class WorkspaceCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    plan: str = "free"
+    status: str = "active"
+
+
+class WorkspaceUpdate(BaseModel):
+    name: Optional[str] = None
+    plan: Optional[str] = None
+    status: Optional[str] = None
+
+
+class WorkspaceOut(BaseModel):
+    id: int
+    name: str
+    plan: str
+    status: str
+    created_at: str
+    api_key_count: int = 0
+    task_count: int = 0
+
+
+class AuditLogOut(BaseModel):
+    id: int
+    actor: str
+    action: str
+    target_type: str
+    target_id: str
+    workspace_id: Optional[int] = None
+    metadata: Dict[str, Any]
+    created_at: str

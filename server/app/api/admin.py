@@ -11,8 +11,9 @@ from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from server.app.db.session import get_db
-from server.app.models.entities import ApiKey, ExecutionReport, GeneratedScript, GenerationTask, Template, Workspace
+from server.app.models.entities import AuditLog, ApiKey, ExecutionReport, GeneratedScript, GenerationTask, Template, Workspace
 from server.app.schemas.admin import (
+    AuditLogOut,
     ApiKeyCreate,
     ApiKeyCreateResponse,
     ApiKeyOut,
@@ -24,11 +25,117 @@ from server.app.schemas.admin import (
     TemplateUpdate,
     UsageDailyItem,
     UsageSummary,
+    WorkspaceCreate,
+    WorkspaceOut,
+    WorkspaceUpdate,
 )
 from server.app.services.auth import authenticate_admin, hash_api_key
 
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"], dependencies=[Depends(authenticate_admin)])
+
+
+def _template_out(row: Template):
+    return TemplateOut(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        name=row.name,
+        category=row.category,
+        prompt=row.prompt,
+        enabled=row.enabled,
+    )
+
+
+def _api_key_out(row: ApiKey):
+    return ApiKeyOut(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        name=row.name,
+        prefix=row.prefix,
+        status=row.status,
+        last_used_at=row.last_used_at.isoformat(timespec="seconds") if row.last_used_at else None,
+        created_at=row.created_at.isoformat(timespec="seconds"),
+    )
+
+
+def _audit(db: Session, action: str, target_type: str, target_id="", workspace_id=None, metadata=None):
+    db.add(
+        AuditLog(
+            actor="admin",
+            action=action,
+            target_type=target_type,
+            target_id=str(target_id or ""),
+            workspace_id=workspace_id,
+            metadata_json=metadata or {},
+        )
+    )
+
+
+@router.get("/workspaces", response_model=list[WorkspaceOut])
+def list_workspaces(db: Session = Depends(get_db)):
+    rows = db.execute(select(Workspace).order_by(Workspace.id)).scalars().all()
+    result = []
+    for row in rows:
+        api_key_count = db.scalar(select(func.count()).select_from(ApiKey).where(ApiKey.workspace_id == row.id)) or 0
+        task_count = db.scalar(select(func.count()).select_from(GenerationTask).where(GenerationTask.workspace_id == row.id)) or 0
+        result.append(
+            WorkspaceOut(
+                id=row.id,
+                name=row.name,
+                plan=row.plan,
+                status=row.status,
+                created_at=row.created_at.isoformat(timespec="seconds"),
+                api_key_count=api_key_count,
+                task_count=task_count,
+            )
+        )
+    return result
+
+
+@router.post("/workspaces", response_model=WorkspaceOut)
+def create_workspace(payload: WorkspaceCreate, db: Session = Depends(get_db)):
+    item = Workspace(name=payload.name, plan=payload.plan, status=payload.status)
+    db.add(item)
+    db.flush()
+    _audit(db, "workspace.create", "workspace", item.id, item.id, {"name": item.name, "plan": item.plan, "status": item.status})
+    db.commit()
+    db.refresh(item)
+    return WorkspaceOut(
+        id=item.id,
+        name=item.name,
+        plan=item.plan,
+        status=item.status,
+        created_at=item.created_at.isoformat(timespec="seconds"),
+        api_key_count=0,
+        task_count=0,
+    )
+
+
+@router.put("/workspaces/{workspace_id}", response_model=WorkspaceOut)
+def update_workspace(workspace_id: int, payload: WorkspaceUpdate, db: Session = Depends(get_db)):
+    item = db.get(Workspace, workspace_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    changed = {}
+    for field in ("name", "plan", "status"):
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(item, field, value)
+            changed[field] = value
+    _audit(db, "workspace.update", "workspace", item.id, item.id, changed)
+    db.commit()
+    db.refresh(item)
+    api_key_count = db.scalar(select(func.count()).select_from(ApiKey).where(ApiKey.workspace_id == item.id)) or 0
+    task_count = db.scalar(select(func.count()).select_from(GenerationTask).where(GenerationTask.workspace_id == item.id)) or 0
+    return WorkspaceOut(
+        id=item.id,
+        name=item.name,
+        plan=item.plan,
+        status=item.status,
+        created_at=item.created_at.isoformat(timespec="seconds"),
+        api_key_count=api_key_count,
+        task_count=task_count,
+    )
 
 
 @router.get("/tasks", response_model=list[TaskListItem])
@@ -40,8 +147,11 @@ def list_tasks(
     action: str = "",
     modeling_mode: str = "",
     q: str = "",
+    workspace_id: int | None = None,
 ):
     stmt = select(GenerationTask)
+    if workspace_id is not None:
+        stmt = stmt.where(GenerationTask.workspace_id == workspace_id)
     if status:
         stmt = stmt.where(GenerationTask.status == status)
     if action:
@@ -85,6 +195,7 @@ def export_tasks(
     action: str = "",
     modeling_mode: str = "",
     q: str = "",
+    workspace_id: int | None = None,
 ):
     rows = list_tasks(
         db=db,
@@ -94,6 +205,7 @@ def export_tasks(
         action=action,
         modeling_mode=modeling_mode,
         q=q,
+        workspace_id=workspace_id,
     )
     buffer = io.StringIO()
     writer = csv.writer(buffer)
@@ -172,17 +284,19 @@ def task_detail(task_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/templates", response_model=list[TemplateOut])
-def list_templates(db: Session = Depends(get_db), include_disabled: bool = False):
+def list_templates(db: Session = Depends(get_db), include_disabled: bool = False, workspace_id: int | None = None):
     stmt = select(Template).order_by(Template.category, Template.name)
+    if workspace_id is not None:
+        stmt = stmt.where(Template.workspace_id == workspace_id)
     if not include_disabled:
         stmt = stmt.where(Template.enabled.is_(True))
     rows = db.execute(stmt).scalars().all()
-    return [TemplateOut(id=row.id, name=row.name, category=row.category, prompt=row.prompt, enabled=row.enabled) for row in rows]
+    return [_template_out(row) for row in rows]
 
 
 @router.get("/templates/export", response_model=list[TemplateOut])
-def export_templates(db: Session = Depends(get_db)):
-    return list_templates(db=db, include_disabled=True)
+def export_templates(db: Session = Depends(get_db), workspace_id: int | None = None):
+    return list_templates(db=db, include_disabled=True, workspace_id=workspace_id)
 
 
 @router.post("/templates/import", response_model=list[TemplateOut])
@@ -190,7 +304,11 @@ def import_templates(payload: TemplateImportRequest, db: Session = Depends(get_d
     imported: list[TemplateOut] = []
     for template in payload.templates:
         existing = db.execute(
-            select(Template).where(Template.name == template.name, Template.category == template.category)
+            select(Template).where(
+                Template.name == template.name,
+                Template.category == template.category,
+                Template.workspace_id == template.workspace_id,
+            )
         ).scalar_one_or_none()
         if existing is None:
             existing = Template(
@@ -205,10 +323,11 @@ def import_templates(payload: TemplateImportRequest, db: Session = Depends(get_d
             existing.workspace_id = template.workspace_id
             existing.prompt = template.prompt
             existing.enabled = template.enabled
+        _audit(db, "template.import", "template", template.name, template.workspace_id, {"category": template.category})
     db.commit()
     rows = db.execute(select(Template).order_by(Template.category, Template.name)).scalars().all()
     for row in rows:
-        imported.append(TemplateOut(id=row.id, name=row.name, category=row.category, prompt=row.prompt, enabled=row.enabled))
+        imported.append(_template_out(row))
     return imported
 
 
@@ -222,9 +341,11 @@ def create_template(payload: TemplateCreate, db: Session = Depends(get_db)):
         enabled=payload.enabled,
     )
     db.add(item)
+    db.flush()
+    _audit(db, "template.create", "template", item.id, item.workspace_id, {"name": item.name, "category": item.category})
     db.commit()
     db.refresh(item)
-    return TemplateOut(id=item.id, name=item.name, category=item.category, prompt=item.prompt, enabled=item.enabled)
+    return _template_out(item)
 
 
 @router.put("/templates/{template_id}", response_model=TemplateOut)
@@ -236,9 +357,10 @@ def update_template(template_id: int, payload: TemplateUpdate, db: Session = Dep
         value = getattr(payload, field)
         if value is not None:
             setattr(item, field, value)
+    _audit(db, "template.update", "template", item.id, item.workspace_id, payload.model_dump(exclude_none=True))
     db.commit()
     db.refresh(item)
-    return TemplateOut(id=item.id, name=item.name, category=item.category, prompt=item.prompt, enabled=item.enabled)
+    return _template_out(item)
 
 
 @router.delete("/templates/{template_id}")
@@ -246,7 +368,10 @@ def delete_template(template_id: int, db: Session = Depends(get_db)):
     item = db.get(Template, template_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Template not found.")
+    workspace_id = item.workspace_id
+    name = item.name
     db.delete(item)
+    _audit(db, "template.delete", "template", template_id, workspace_id, {"name": name})
     db.commit()
     return {"ok": True}
 
@@ -267,26 +392,20 @@ def create_api_key(payload: ApiKeyCreate, db: Session = Depends(get_db)):
         prefix=prefix,
     )
     db.add(item)
+    db.flush()
+    _audit(db, "api_key.create", "api_key", item.id, item.workspace_id, {"name": item.name, "prefix": prefix})
     db.commit()
     db.refresh(item)
     return ApiKeyCreateResponse(id=item.id, api_key=raw_key, prefix=prefix)
 
 
 @router.get("/api-keys", response_model=list[ApiKeyOut])
-def list_api_keys(db: Session = Depends(get_db)):
-    rows = db.execute(select(ApiKey).order_by(desc(ApiKey.id))).scalars().all()
-    return [
-        ApiKeyOut(
-            id=row.id,
-            workspace_id=row.workspace_id,
-            name=row.name,
-            prefix=row.prefix,
-            status=row.status,
-            last_used_at=row.last_used_at.isoformat(timespec="seconds") if row.last_used_at else None,
-            created_at=row.created_at.isoformat(timespec="seconds"),
-        )
-        for row in rows
-    ]
+def list_api_keys(db: Session = Depends(get_db), workspace_id: int | None = None):
+    stmt = select(ApiKey).order_by(desc(ApiKey.id))
+    if workspace_id is not None:
+        stmt = stmt.where(ApiKey.workspace_id == workspace_id)
+    rows = db.execute(stmt).scalars().all()
+    return [_api_key_out(row) for row in rows]
 
 
 @router.post("/api-keys/{key_id}/revoke", response_model=ApiKeyOut)
@@ -295,17 +414,10 @@ def revoke_api_key(key_id: int, db: Session = Depends(get_db)):
     if item is None:
         raise HTTPException(status_code=404, detail="API key not found.")
     item.status = "revoked"
+    _audit(db, "api_key.revoke", "api_key", item.id, item.workspace_id, {"prefix": item.prefix})
     db.commit()
     db.refresh(item)
-    return ApiKeyOut(
-        id=item.id,
-        workspace_id=item.workspace_id,
-        name=item.name,
-        prefix=item.prefix,
-        status=item.status,
-        last_used_at=item.last_used_at.isoformat(timespec="seconds") if item.last_used_at else None,
-        created_at=item.created_at.isoformat(timespec="seconds"),
-    )
+    return _api_key_out(item)
 
 
 @router.post("/api-keys/{key_id}/enable", response_model=ApiKeyOut)
@@ -314,25 +426,28 @@ def enable_api_key(key_id: int, db: Session = Depends(get_db)):
     if item is None:
         raise HTTPException(status_code=404, detail="API key not found.")
     item.status = "active"
+    _audit(db, "api_key.enable", "api_key", item.id, item.workspace_id, {"prefix": item.prefix})
     db.commit()
     db.refresh(item)
-    return ApiKeyOut(
-        id=item.id,
-        workspace_id=item.workspace_id,
-        name=item.name,
-        prefix=item.prefix,
-        status=item.status,
-        last_used_at=item.last_used_at.isoformat(timespec="seconds") if item.last_used_at else None,
-        created_at=item.created_at.isoformat(timespec="seconds"),
-    )
+    return _api_key_out(item)
 
 
 @router.get("/usage", response_model=UsageSummary)
-def usage_summary(db: Session = Depends(get_db)):
-    task_count = db.scalar(select(func.count()).select_from(GenerationTask)) or 0
-    succeeded_count = db.scalar(select(func.count()).select_from(GenerationTask).where(GenerationTask.status == "succeeded")) or 0
-    failed_count = db.scalar(select(func.count()).select_from(GenerationTask).where(GenerationTask.status == "failed")) or 0
-    report_count = db.scalar(select(func.count()).select_from(ExecutionReport)) or 0
+def usage_summary(db: Session = Depends(get_db), workspace_id: int | None = None):
+    task_stmt = select(func.count()).select_from(GenerationTask)
+    succeeded_stmt = select(func.count()).select_from(GenerationTask).where(GenerationTask.status == "succeeded")
+    failed_stmt = select(func.count()).select_from(GenerationTask).where(GenerationTask.status == "failed")
+    report_stmt = select(func.count()).select_from(ExecutionReport)
+    if workspace_id is not None:
+        task_stmt = task_stmt.where(GenerationTask.workspace_id == workspace_id)
+        succeeded_stmt = succeeded_stmt.where(GenerationTask.workspace_id == workspace_id)
+        failed_stmt = failed_stmt.where(GenerationTask.workspace_id == workspace_id)
+        task_ids = select(GenerationTask.id).where(GenerationTask.workspace_id == workspace_id)
+        report_stmt = report_stmt.where(ExecutionReport.task_id.in_(task_ids))
+    task_count = db.scalar(task_stmt) or 0
+    succeeded_count = db.scalar(succeeded_stmt) or 0
+    failed_count = db.scalar(failed_stmt) or 0
+    report_count = db.scalar(report_stmt) or 0
     return UsageSummary(
         task_count=task_count,
         succeeded_count=succeeded_count,
@@ -342,7 +457,7 @@ def usage_summary(db: Session = Depends(get_db)):
 
 
 @router.get("/usage/daily", response_model=list[UsageDailyItem])
-def usage_daily(db: Session = Depends(get_db), days: int = Query(default=14, ge=1, le=90)):
+def usage_daily(db: Session = Depends(get_db), days: int = Query(default=14, ge=1, le=90), workspace_id: int | None = None):
     start_day = (datetime.utcnow() - timedelta(days=days - 1)).date()
     buckets = {
         (start_day + timedelta(days=index)).isoformat(): {
@@ -353,7 +468,10 @@ def usage_daily(db: Session = Depends(get_db), days: int = Query(default=14, ge=
         }
         for index in range(days)
     }
-    task_rows = db.execute(select(GenerationTask).where(GenerationTask.created_at >= datetime.combine(start_day, datetime.min.time()))).scalars().all()
+    task_stmt = select(GenerationTask).where(GenerationTask.created_at >= datetime.combine(start_day, datetime.min.time()))
+    if workspace_id is not None:
+        task_stmt = task_stmt.where(GenerationTask.workspace_id == workspace_id)
+    task_rows = db.execute(task_stmt).scalars().all()
     for task in task_rows:
         key = task.created_at.date().isoformat()
         if key in buckets:
@@ -362,7 +480,11 @@ def usage_daily(db: Session = Depends(get_db), days: int = Query(default=14, ge=
                 buckets[key]["succeeded_count"] += 1
             if task.status == "failed":
                 buckets[key]["failed_count"] += 1
-    report_rows = db.execute(select(ExecutionReport).where(ExecutionReport.created_at >= datetime.combine(start_day, datetime.min.time()))).scalars().all()
+    report_stmt = select(ExecutionReport).where(ExecutionReport.created_at >= datetime.combine(start_day, datetime.min.time()))
+    if workspace_id is not None:
+        task_ids = select(GenerationTask.id).where(GenerationTask.workspace_id == workspace_id)
+        report_stmt = report_stmt.where(ExecutionReport.task_id.in_(task_ids))
+    report_rows = db.execute(report_stmt).scalars().all()
     for report in report_rows:
         key = report.created_at.date().isoformat()
         if key in buckets:
@@ -370,4 +492,33 @@ def usage_daily(db: Session = Depends(get_db), days: int = Query(default=14, ge=
     return [
         UsageDailyItem(day=day, **values)
         for day, values in buckets.items()
+    ]
+
+
+@router.get("/audit-logs", response_model=list[AuditLogOut])
+def list_audit_logs(
+    db: Session = Depends(get_db),
+    limit: int = Query(default=80, ge=1, le=300),
+    offset: int = Query(default=0, ge=0),
+    workspace_id: int | None = None,
+    action: str = "",
+):
+    stmt = select(AuditLog).order_by(desc(AuditLog.id)).offset(offset).limit(limit)
+    if workspace_id is not None:
+        stmt = stmt.where(AuditLog.workspace_id == workspace_id)
+    if action:
+        stmt = stmt.where(AuditLog.action == action)
+    rows = db.execute(stmt).scalars().all()
+    return [
+        AuditLogOut(
+            id=row.id,
+            actor=row.actor,
+            action=row.action,
+            target_type=row.target_type,
+            target_id=row.target_id,
+            workspace_id=row.workspace_id,
+            metadata=row.metadata_json,
+            created_at=row.created_at.isoformat(timespec="seconds"),
+        )
+        for row in rows
     ]
