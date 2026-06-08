@@ -91,6 +91,16 @@ SaaS Base URL: http://127.0.0.1:8000
 SaaS API Key: dev-plugin-key
 ```
 
+当前服务器 Docker 部署信息：
+
+```text
+容器名：freecadai-api
+镜像名：freecadai-api
+部署目录：/home/app/freecadai
+启动方式：docker compose -f docker-compose.prod.yml up -d --build
+重启策略：unless-stopped
+```
+
 ## 二维草图
 
 如果要生成二维草图：
