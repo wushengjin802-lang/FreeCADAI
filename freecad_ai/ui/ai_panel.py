@@ -1,4 +1,4 @@
-"""Dockable AI panel for the phase 3 FreeCADAI prototype."""
+"""Dockable AI panel for the phase 4 FreeCADAI prototype."""
 
 import json
 import traceback
@@ -12,6 +12,7 @@ except ImportError:  # FreeCAD builds may expose PySide instead of PySide2.
     from PySide import QtCore, QtGui
     QtWidgets = QtGui
 
+from freecad_ai.cloud.client import FreeCADAICloudClient, format_cloud_error
 from freecad_ai.executor import execute_script
 from freecad_ai.freecad_context import collect_context
 from freecad_ai.llm.client import LLMClientError, OpenAICompatibleClient, format_llm_error
@@ -28,7 +29,7 @@ from freecad_ai.templates import get_template_prompt, template_names
 from freecad_ai.validator import ScriptValidationError, validate_script
 
 
-PANEL_OBJECT_NAME = "FreeCADAIPhase3Panel"
+PANEL_OBJECT_NAME = "FreeCADAIPhase4Panel"
 
 
 class BackgroundTask(QtCore.QObject):
@@ -85,7 +86,7 @@ class PromptTextEdit(QtWidgets.QPlainTextEdit):
 
 
 class AIPanel(QtWidgets.QDockWidget):
-    """Phase 3 dock widget for templates, generation, and repair."""
+    """Phase 4 dock widget for local or cloud generation and repair."""
 
     def __init__(self, parent=None):
         super().__init__("FreeCADAI", parent)
@@ -113,12 +114,12 @@ class AIPanel(QtWidgets.QDockWidget):
         body = QtWidgets.QWidget()
         root = QtWidgets.QVBoxLayout(body)
 
-        title = QtWidgets.QLabel("AI 智能工作台 - 阶段 3")
+        title = QtWidgets.QLabel("AI 智能工作台 - 阶段 4")
         title.setStyleSheet("font-weight: 600; font-size: 15px;")
         root.addWidget(title)
 
         description = QtWidgets.QLabel(
-            "支持模板、LLM 脚本生成、自动校验、自动修复，并在当前 FreeCAD 文档中执行。"
+            "支持本地直连或云端 SaaS 生成脚本、自动校验、自动修复，并在当前 FreeCAD 文档中执行。"
         )
         description.setWordWrap(True)
         root.addWidget(description)
@@ -245,7 +246,19 @@ class AIPanel(QtWidgets.QDockWidget):
         tab = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(tab)
 
-        layout.addWidget(self._section_title("LLM API 连接设置"))
+        layout.addWidget(self._section_title("服务模式"))
+        mode_form = QtWidgets.QFormLayout()
+        self.service_mode_combo = QtWidgets.QComboBox()
+        self.service_mode_combo.addItem("本地直连 LLM", "local")
+        self.service_mode_combo.addItem("云端 SaaS 服务", "cloud")
+        current_mode = self.config.get("service_mode", "local")
+        index = self.service_mode_combo.findData(current_mode)
+        if index >= 0:
+            self.service_mode_combo.setCurrentIndex(index)
+        mode_form.addRow("服务模式", self.service_mode_combo)
+        layout.addLayout(mode_form)
+
+        layout.addWidget(self._section_title("本地 LLM API 连接设置"))
         form = QtWidgets.QFormLayout()
         self.base_url_input = QtWidgets.QLineEdit(self.config.get("base_url", ""))
         self.api_key_input = QtWidgets.QLineEdit(self.config.get("api_key", ""))
@@ -262,13 +275,27 @@ class AIPanel(QtWidgets.QDockWidget):
         form.addRow("Temperature", self.temperature_input)
         layout.addLayout(form)
 
+        layout.addWidget(self._section_title("云端 SaaS 连接设置"))
+        cloud_form = QtWidgets.QFormLayout()
+        self.cloud_base_url_input = QtWidgets.QLineEdit(self.config.get("cloud_base_url", ""))
+        self.cloud_api_key_input = QtWidgets.QLineEdit(self.config.get("cloud_api_key", ""))
+        self.cloud_api_key_input.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.cloud_project_id_input = QtWidgets.QLineEdit(self.config.get("cloud_project_id", ""))
+        self.cloud_sync_history_checkbox = QtWidgets.QCheckBox("执行后回传结果")
+        self.cloud_sync_history_checkbox.setChecked(bool(self.config.get("cloud_sync_history", True)))
+        cloud_form.addRow("SaaS Base URL", self.cloud_base_url_input)
+        cloud_form.addRow("SaaS API Key", self.cloud_api_key_input)
+        cloud_form.addRow("Project ID", self.cloud_project_id_input)
+        cloud_form.addRow("云端同步", self.cloud_sync_history_checkbox)
+        layout.addLayout(cloud_form)
+
         self.save_settings_button = QtWidgets.QPushButton("保存设置")
         self.save_settings_button.clicked.connect(self._save_settings)
         layout.addWidget(self.save_settings_button)
 
         layout.addWidget(self._section_title("设置说明"))
         note = QtWidgets.QLabel(
-            "Base URL 示例：https://api.openai.com/v1 或其他兼容 /chat/completions 的网关。"
+            "本地 Base URL 示例：https://api.openai.com/v1。云端 SaaS Base URL 示例：http://127.0.0.1:8000。"
         )
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -290,15 +317,21 @@ class AIPanel(QtWidgets.QDockWidget):
 
     def _current_settings(self):
         return {
+            "service_mode": self.service_mode_combo.currentData() or "local",
             "base_url": self.base_url_input.text().strip(),
             "api_key": self.api_key_input.text().strip(),
             "model": self.model_input.text().strip(),
             "temperature": self.temperature_input.value(),
+            "cloud_base_url": self.cloud_base_url_input.text().strip(),
+            "cloud_api_key": self.cloud_api_key_input.text().strip(),
+            "cloud_project_id": self.cloud_project_id_input.text().strip(),
+            "cloud_sync_history": self.cloud_sync_history_checkbox.isChecked(),
         }
 
     def _save_settings(self):
         self.config = save_config(self._current_settings())
-        self._set_status("设置已保存。下一次生成会使用这组连接参数。")
+        mode_name = "云端 SaaS 服务" if self._using_cloud() else "本地直连 LLM"
+        self._set_status("设置已保存。下一次生成会使用：{}。".format(mode_name))
 
     def _set_busy(self, busy):
         for button in (
@@ -413,6 +446,18 @@ class AIPanel(QtWidgets.QDockWidget):
     def _modeling_mode(self):
         return self.modeling_mode_combo.currentData() or "3d_solid"
 
+    def _using_cloud(self):
+        return self.config.get("service_mode", "local") == "cloud"
+
+    def _provider_label(self):
+        if self._using_cloud():
+            return "cloud:{}".format(self.config.get("cloud_base_url", ""))
+        return self.config.get("model", "")
+
+    def _format_request_error(self, error):
+        formatter = format_cloud_error if self._using_cloud() else format_llm_error
+        return formatter(Exception(error))
+
     def _show_context(self):
         self._set_status("正在读取当前 FreeCAD 文档和选中对象信息...")
         try:
@@ -430,10 +475,16 @@ class AIPanel(QtWidgets.QDockWidget):
         self._clear_generation_outputs("已清空旧结果。正在整理需求、读取当前模型上下文，并准备调用 LLM...")
         try:
             context = collect_context()
-            messages = build_generation_messages(prompt, context, self._modeling_mode())
         except Exception:
             self._set_status("读取上下文失败：\n{}".format(traceback.format_exc()))
             return
+        if self._using_cloud():
+            request_callback = lambda: self._request_cloud_generate(prompt, context)
+            task_message = "上下文已读取，正在后台请求云端 SaaS 生成 FreeCAD Python 脚本；界面可以继续操作。"
+        else:
+            messages = build_generation_messages(prompt, context, self._modeling_mode())
+            request_callback = lambda: self._request_payload(messages)
+            task_message = "上下文已读取，正在后台请求 LLM 生成 FreeCAD Python 脚本；界面不会再卡住。"
 
         def success(payload):
             self._set_status("LLM 已返回脚本，已自动完成基础安全校验，正在更新预览窗口...")
@@ -447,20 +498,21 @@ class AIPanel(QtWidgets.QDockWidget):
                     "summary": payload.get("summary", ""),
                     "parameters": payload.get("parameters", {}),
                     "expected_objects": payload.get("expected_objects", []),
-                    "model": self.config.get("model", ""),
+                    "model": self._provider_label(),
                     "status": "generated",
+                    "task_id": payload.get("task_id", ""),
                 }
             )
             self._refresh_history()
             self._set_status("生成完成：脚本已自动校验通过。你可以检查参数和脚本，然后点击“执行脚本”。")
 
         def failed(error):
-            self._set_status("生成失败：\n{}".format(format_llm_error(Exception(error))))
+            self._set_status("生成失败：\n{}".format(self._format_request_error(error)))
 
         self._start_background_task(
             "LLM 生成脚本",
-            "上下文已读取，正在后台请求 LLM 生成 FreeCAD Python 脚本；界面不会再卡住。",
-            lambda: self._request_payload(messages),
+            task_message,
+            request_callback,
             success,
             failed,
             button=self.generate_button,
@@ -513,12 +565,69 @@ class AIPanel(QtWidgets.QDockWidget):
             self.config["model"],
         )
 
+    def _build_cloud_client(self):
+        return FreeCADAICloudClient(
+            self.config.get("cloud_base_url", ""),
+            self.config.get("cloud_api_key", ""),
+            self.config.get("cloud_project_id", ""),
+        )
+
     def _request_payload(self, messages):
         client = self._build_client()
         raw = client.chat(messages, temperature=self.config.get("temperature", 0.1))
         payload = parse_generation_response(raw)
         validate_script(payload["script"])
         return payload
+
+    def _request_cloud_generate(self, prompt, context):
+        payload = self._build_cloud_client().generate(prompt, context, self._modeling_mode())
+        validate_script(payload["script"])
+        return payload
+
+    def _request_cloud_repair(self, prompt, context, failed_script, error):
+        payload = self._build_cloud_client().repair(
+            prompt,
+            context,
+            failed_script,
+            error,
+            self._modeling_mode(),
+        )
+        validate_script(payload["script"])
+        return payload
+
+    def _request_cloud_regenerate(self, prompt, context, parameters_text):
+        payload = self._build_cloud_client().regenerate(
+            prompt,
+            context,
+            parameters_text,
+            self._modeling_mode(),
+        )
+        validate_script(payload["script"])
+        return payload
+
+    def _report_execution(self, status, execution_result, error_text):
+        if not self._using_cloud() or not self.config.get("cloud_sync_history", True):
+            return
+        payload = self.generated_payload or {}
+        task_id = payload.get("task_id")
+        script_id = payload.get("script_id")
+        if not task_id:
+            return
+        report = {
+            "task_id": task_id,
+            "script_id": script_id,
+            "status": status,
+            "plugin_version": "phase-4",
+            "freecad_version": getattr(App, "Version", lambda: ["unknown"])(),
+            "document_name": execution_result.get("document", ""),
+            "object_count": execution_result.get("object_count", 0),
+            "new_objects": execution_result.get("new_objects", []),
+            "error_trace": error_text,
+        }
+        try:
+            self._build_cloud_client().execution_report(report)
+        except Exception as exc:
+            App.Console.PrintWarning("FreeCADAI cloud execution report failed: {}\n".format(exc))
 
     def _execute_script(self):
         script = self.script_box.toPlainText().strip()
@@ -544,11 +653,12 @@ class AIPanel(QtWidgets.QDockWidget):
                 {
                     "prompt": self.prompt_box.toPlainText().strip(),
                     "summary": (self.generated_payload or {}).get("summary", "manual script"),
-                    "model": self.config.get("model", ""),
+                    "model": self._provider_label(),
                     "status": "executed",
                 }
             )
             self._refresh_history()
+            self._report_execution("succeeded", execution_result, "")
             self._set_status(self._format_execution_success(execution_result))
         except Exception:
             error = traceback.format_exc()
@@ -560,11 +670,12 @@ class AIPanel(QtWidgets.QDockWidget):
                 {
                     "prompt": self.prompt_box.toPlainText().strip(),
                     "summary": "execution failed",
-                    "model": self.config.get("model", ""),
+                    "model": self._provider_label(),
                     "status": "failed",
                     "error": error,
                 }
             )
+            self._report_execution("failed", {}, error)
             if repair_attempts > 0:
                 self._set_status("执行失败：错误信息已保留。正在后台生成修复脚本，FreeCAD 界面仍可操作...\n{}".format(error))
                 self._stop_button_spinner()
@@ -581,16 +692,18 @@ class AIPanel(QtWidgets.QDockWidget):
     def _start_auto_repair(self, failed_script, error):
         self._save_settings()
         try:
-            messages = build_repair_messages(
-                self.prompt_box.toPlainText().strip(),
-                collect_context(),
-                failed_script,
-                error,
-                self._modeling_mode(),
-            )
+            prompt = self.prompt_box.toPlainText().strip()
+            context = collect_context()
         except Exception:
             self._set_status("自动修复前读取上下文失败：\n{}".format(traceback.format_exc()))
             return
+        if self._using_cloud():
+            request_callback = lambda: self._request_cloud_repair(prompt, context, failed_script, error)
+            task_message = "正在后台请求云端 SaaS 生成修复脚本，FreeCAD 界面可以继续操作。"
+        else:
+            messages = build_repair_messages(prompt, context, failed_script, error, self._modeling_mode())
+            request_callback = lambda: self._request_payload(messages)
+            task_message = "正在后台生成修复脚本，FreeCAD 界面可以继续操作。"
 
         def success(payload):
             self.generated_payload = payload
@@ -601,21 +714,22 @@ class AIPanel(QtWidgets.QDockWidget):
                     "summary": payload.get("summary", "自动修复脚本"),
                     "parameters": payload.get("parameters", {}),
                     "expected_objects": payload.get("expected_objects", []),
-                    "model": self.config.get("model", ""),
+                    "model": self._provider_label(),
                     "status": "auto-repaired",
                     "attempt": 1,
+                    "task_id": payload.get("task_id", ""),
                 }
             )
             self._refresh_history()
             self._set_status("自动修复完成：修复脚本已放入预览区并通过基础安全校验。请检查后再次点击“执行脚本”。")
 
         def failed(error_text):
-            self._set_status("自动修复失败：\n{}".format(format_llm_error(Exception(error_text))))
+            self._set_status("自动修复失败：\n{}".format(self._format_request_error(error_text)))
 
         self._start_background_task(
             "自动修复脚本",
-            "正在后台生成修复脚本，FreeCAD 界面可以继续操作。",
-            lambda: self._request_payload(messages),
+            task_message,
+            request_callback,
             success,
             failed,
             button=self.repair_button,
@@ -645,16 +759,18 @@ class AIPanel(QtWidgets.QDockWidget):
         failed_script = self.last_failed_script
         last_error = self.last_error
         try:
-            messages = build_repair_messages(
-                self.prompt_box.toPlainText().strip(),
-                collect_context(),
-                failed_script,
-                last_error,
-                self._modeling_mode(),
-            )
+            prompt = self.prompt_box.toPlainText().strip()
+            context = collect_context()
         except Exception:
             self._set_status("修复前读取上下文失败：\n{}".format(traceback.format_exc()))
             return
+        if self._using_cloud():
+            request_callback = lambda: self._request_cloud_repair(prompt, context, failed_script, last_error)
+            task_message = "正在后台请求云端 SaaS 修复失败脚本，FreeCAD 界面可以继续操作。"
+        else:
+            messages = build_repair_messages(prompt, context, failed_script, last_error, self._modeling_mode())
+            request_callback = lambda: self._request_payload(messages)
+            task_message = "正在后台把失败脚本和错误信息交给 LLM 修复，FreeCAD 界面可以继续操作。"
 
         def success(payload):
             self.generated_payload = payload
@@ -666,20 +782,21 @@ class AIPanel(QtWidgets.QDockWidget):
                     "summary": payload.get("summary", "修复脚本"),
                     "parameters": payload.get("parameters", {}),
                     "expected_objects": payload.get("expected_objects", []),
-                    "model": self.config.get("model", ""),
+                    "model": self._provider_label(),
                     "status": "repaired",
+                    "task_id": payload.get("task_id", ""),
                 }
             )
             self._refresh_history()
             self._set_status("修复完成：脚本已自动校验通过。检查无误后可以再次执行。")
 
         def failed(error):
-            self._set_status("修复失败：\n{}".format(format_llm_error(Exception(error))))
+            self._set_status("修复失败：\n{}".format(self._format_request_error(error)))
 
         self._start_background_task(
             "LLM 修复脚本",
-            "正在后台把失败脚本和错误信息交给 LLM 修复，FreeCAD 界面可以继续操作。",
-            lambda: self._request_payload(messages),
+            task_message,
+            request_callback,
             success,
             failed,
             button=self.repair_button,
@@ -704,15 +821,22 @@ class AIPanel(QtWidgets.QDockWidget):
         self.summary_box.clear()
         self.script_box.clear()
         try:
-            messages = build_regeneration_with_parameters_messages(
-                prompt,
-                collect_context(),
-                parameters_text,
-                self._modeling_mode(),
-            )
+            context = collect_context()
         except Exception:
             self._set_status("读取上下文失败：\n{}".format(traceback.format_exc()))
             return
+        if self._using_cloud():
+            request_callback = lambda: self._request_cloud_regenerate(prompt, context, parameters_text)
+            task_message = "已读取编辑后的参数，正在后台请求云端 SaaS 重新生成脚本。"
+        else:
+            messages = build_regeneration_with_parameters_messages(
+                prompt,
+                context,
+                parameters_text,
+                self._modeling_mode(),
+            )
+            request_callback = lambda: self._request_payload(messages)
+            task_message = "已读取编辑后的参数，正在后台重新生成脚本；界面可以继续响应。"
 
         def success(payload):
             self.generated_payload = payload
@@ -725,20 +849,21 @@ class AIPanel(QtWidgets.QDockWidget):
                     "summary": payload.get("summary", "按参数重新生成"),
                     "parameters": payload.get("parameters", {}),
                     "expected_objects": payload.get("expected_objects", []),
-                    "model": self.config.get("model", ""),
+                    "model": self._provider_label(),
                     "status": "regenerated-with-parameters",
+                    "task_id": payload.get("task_id", ""),
                 }
             )
             self._refresh_history()
             self._set_status("已按参数重新生成：脚本已自动校验通过，可以执行。")
 
         def failed(error):
-            self._set_status("按参数重新生成失败：\n{}".format(format_llm_error(Exception(error))))
+            self._set_status("按参数重新生成失败：\n{}".format(self._format_request_error(error)))
 
         self._start_background_task(
             "按参数重新生成",
-            "已读取编辑后的参数，正在后台重新生成脚本；界面可以继续响应。",
-            lambda: self._request_payload(messages),
+            task_message,
+            request_callback,
             success,
             failed,
             button=self.regenerate_params_button,

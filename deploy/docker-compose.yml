@@ -1,0 +1,36 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: freecadai-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: freecadai
+      MYSQL_USER: freecadai
+      MYSQL_PASSWORD: freecadai_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - freecadai-mysql:/var/lib/mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+
+  api:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    container_name: freecadai-api
+    depends_on:
+      - mysql
+    environment:
+      FREECADAI_DATABASE_URL: mysql+pymysql://freecadai:freecadai_password@mysql:3306/freecadai?charset=utf8mb4
+      FREECADAI_PLUGIN_API_KEY: dev-plugin-key
+      FREECADAI_LLM_BASE_URL: https://api.openai.com/v1
+      FREECADAI_LLM_API_KEY: ""
+      FREECADAI_LLM_MODEL: gpt-4.1-mini
+      FREECADAI_LLM_TEMPERATURE: "0.1"
+    ports:
+      - "8000:8000"
+
+volumes:
+  freecadai-mysql:

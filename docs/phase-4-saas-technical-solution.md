@@ -174,12 +174,11 @@ flowchart LR
 
 负责：
 
-- 语音文件上传。
 - 执行截图上传。
 - STEP / STL / GLB 等模型文件保存。
 - 任务附件管理。
 
-阶段 4 可以先支持音频和截图，模型文件导出可以放到阶段 5。
+阶段 4 可以先支持执行截图，模型文件导出可以放到阶段 5。
 
 ## 5. MySQL 数据库设计
 
@@ -210,7 +209,7 @@ utf8mb4_0900_ai_ci
 | generation_tasks | 生成任务 |
 | generated_scripts | 生成脚本 |
 | execution_reports | 插件执行结果 |
-| assets | 音频、截图、模型文件等资产 |
+| assets | 截图、模型文件等资产 |
 | usage_records | token、调用次数、费用记录 |
 | feedbacks | 用户反馈 |
 
@@ -330,7 +329,6 @@ utf8mb4_0900_ai_ci
 | POST | /api/v1/plugin/generate | 生成 FreeCAD Python 脚本 |
 | POST | /api/v1/plugin/repair | 修复失败脚本 |
 | POST | /api/v1/plugin/regenerate | 按参数重新生成 |
-| POST | /api/v1/plugin/transcribe | 音频转文字 |
 | POST | /api/v1/plugin/execution-reports | 回传执行结果 |
 
 ### 6.2 Web 管理 API

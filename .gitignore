@@ -1,3 +1,10 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.venv/
+server/.env
+*.sqlite
+*.db
+node_modules/
+dist/
+build/

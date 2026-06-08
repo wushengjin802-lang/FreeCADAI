@@ -10,10 +10,15 @@ except ImportError:
 
 
 DEFAULT_CONFIG = {
+    "service_mode": "local",
     "base_url": "https://api.openai.com/v1",
     "api_key": "",
     "model": "gpt-4.1-mini",
     "temperature": 0.1,
+    "cloud_base_url": "http://127.0.0.1:8000",
+    "cloud_api_key": "",
+    "cloud_project_id": "",
+    "cloud_sync_history": True,
 }
 
 
