@@ -5,12 +5,14 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
+from server.app.api.admin import auth_router as admin_auth_router
 from server.app.api.admin import router as admin_router
 from server.app.api.plugin import router as plugin_router
 from server.app.core.config import settings
 from server.app.core.redis import redis_ping
 from server.app.db.base import Base
-from server.app.db.session import engine
+from server.app.db.session import SessionLocal, engine
+from server.app.services.auth import ensure_default_admin
 
 # Import models so create_all can discover them in the phase 4 prototype.
 from server.app.models import entities  # noqa: F401
@@ -18,6 +20,7 @@ from server.app.models import entities  # noqa: F401
 
 app = FastAPI(title=settings.app_name, version="0.4.0")
 app.include_router(plugin_router)
+app.include_router(admin_auth_router)
 app.include_router(admin_router)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -48,6 +51,11 @@ def admin_page():
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        ensure_default_admin(db)
+    finally:
+        db.close()
 
 
 @app.get("/health")

@@ -25,6 +25,9 @@ class Settings:
     llm_temperature = float(os.getenv("FREECADAI_LLM_TEMPERATURE", "0.1"))
     redis_url = os.getenv("FREECADAI_REDIS_URL", "redis://127.0.0.1:6379/0")
     admin_token = os.getenv("FREECADAI_ADMIN_TOKEN", "")
+    admin_username = os.getenv("FREECADAI_ADMIN_USERNAME", "admin")
+    admin_password = os.getenv("FREECADAI_ADMIN_PASSWORD", admin_token)
+    admin_session_hours = int(os.getenv("FREECADAI_ADMIN_SESSION_HOURS", "12"))
 
 
 settings = Settings()

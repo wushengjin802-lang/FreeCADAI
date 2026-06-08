@@ -106,7 +106,7 @@
 
     .auth {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 150px 82px;
+      grid-template-columns: 110px 120px minmax(0, 1fr) 150px 82px 82px;
       gap: 8px;
       background: rgba(255,255,255,0.72);
       border: 1px solid var(--line);
@@ -286,6 +286,7 @@
         <button data-view="tasks">任务历史</button>
         <button data-view="templates">模板库</button>
         <button data-view="keys">API Key</button>
+        <button data-view="adminUsers">管理员</button>
         <button data-view="audit">审计日志</button>
       </nav>
     </aside>
@@ -297,9 +298,12 @@
           <div class="sub">连接到当前 FreeCADAI SaaS 服务实例。</div>
         </div>
         <div class="auth">
+          <input id="loginUsername" placeholder="用户名" value="admin" />
+          <input id="loginPassword" type="password" placeholder="密码" />
           <input id="tokenInput" type="password" placeholder="Admin Token" />
           <select id="workspaceFilter"><option value="">全部工作区</option></select>
           <button class="secondary" id="saveToken">保存</button>
+          <button class="primary" id="loginButton">登录</button>
         </div>
       </div>
 
@@ -472,6 +476,33 @@
         </div>
       </section>
 
+      <section id="adminUsers" class="view hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>创建管理员</h2>
+            <button class="primary" onclick="createAdminUser()">创建</button>
+          </div>
+          <div class="panel-body">
+            <div class="form-grid">
+              <input id="adminUsername" placeholder="用户名" />
+              <select id="adminRole"><option value="operator">operator</option><option value="owner">owner</option></select>
+              <select id="adminStatus"><option value="active">active</option><option value="suspended">suspended</option></select>
+            </div>
+            <input id="adminPassword" type="password" placeholder="初始密码，至少 8 位" />
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>管理员列表</h2>
+            <button class="secondary" onclick="loadAdminUsers()">刷新</button>
+          </div>
+          <table>
+            <thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>状态</th><th>最近登录</th><th>创建时间</th><th>操作</th></tr></thead>
+            <tbody id="adminUserRows"></tbody>
+          </table>
+        </div>
+      </section>
+
       <section id="audit" class="view hidden">
         <div class="panel">
           <div class="panel-head">
@@ -493,6 +524,7 @@
     const prefix = location.pathname.split('/admin')[0] || '';
     const adminBase = `${prefix}/api/v1/admin`;
     const healthUrl = `${prefix}/health`;
+    const authBase = `${adminBase}/auth`;
     const tokenInput = document.getElementById('tokenInput');
     const workspaceFilter = document.getElementById('workspaceFilter');
     const savedToken = localStorage.getItem('freecadai_admin_token') || '';
@@ -504,6 +536,18 @@
       localStorage.setItem('freecadai_admin_token', tokenInput.value.trim());
       showMessage('Admin Token 已保存。', true);
       refreshAll();
+    };
+
+    document.getElementById('loginButton').onclick = async () => {
+      try {
+        const data = await loginAdmin();
+        tokenInput.value = data.token;
+        localStorage.setItem('freecadai_admin_token', data.token);
+        showMessage(`已登录：${data.user.username}`, true);
+        await refreshAll();
+      } catch (error) {
+        showMessage(error.message);
+      }
     };
 
     workspaceFilter.onchange = () => {
@@ -549,6 +593,22 @@
       const response = await fetch(`${adminBase}${path}`, {
         ...options,
         headers: { ...headers(), ...(options.headers || {}) }
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || response.statusText);
+      }
+      return response.json();
+    }
+
+    async function loginAdmin() {
+      const response = await fetch(`${authBase}/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: document.getElementById('loginUsername').value.trim(),
+          password: document.getElementById('loginPassword').value
+        })
       });
       if (!response.ok) {
         const text = await response.text();
@@ -792,6 +852,46 @@
       `).join('') || '<tr><td colspan="8" class="muted">暂无 API Key。</td></tr>';
     }
 
+    async function loadAdminUsers() {
+      const rows = await api('/admin-users');
+      const body = document.getElementById('adminUserRows');
+      body.innerHTML = rows.map(row => `
+        <tr>
+          <td>${row.id}</td>
+          <td>${escapeHtml(row.username)}</td>
+          <td>${escapeHtml(row.role)}</td>
+          <td><span class="pill ${row.status}">${row.status}</span></td>
+          <td>${row.last_login_at || '-'}</td>
+          <td>${row.created_at}</td>
+          <td class="row-actions">
+            <button class="secondary" onclick="setAdminUserStatus(${row.id}, '${row.status === 'active' ? 'suspended' : 'active'}')">${row.status === 'active' ? '停用' : '启用'}</button>
+          </td>
+        </tr>
+      `).join('') || '<tr><td colspan="7" class="muted">暂无管理员。</td></tr>';
+    }
+
+    async function createAdminUser() {
+      await api('/admin-users', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: document.getElementById('adminUsername').value.trim(),
+          password: document.getElementById('adminPassword').value,
+          role: document.getElementById('adminRole').value,
+          status: document.getElementById('adminStatus').value
+        })
+      });
+      document.getElementById('adminUsername').value = '';
+      document.getElementById('adminPassword').value = '';
+      showMessage('管理员已创建。', true);
+      await loadAdminUsers();
+    }
+
+    async function setAdminUserStatus(id, status) {
+      await api(`/admin-users/${id}`, { method: 'PUT', body: JSON.stringify({ status }) });
+      showMessage('管理员状态已更新。', true);
+      await loadAdminUsers();
+    }
+
     async function revokeKey(id) {
       if (!confirm('撤销后插件将不能继续使用这个 Key。确认撤销？')) return;
       await api(`/api-keys/${id}/revoke`, { method: 'POST' });
@@ -843,7 +943,7 @@
         await loadHealth();
         if (tokenInput.value.trim()) {
           await loadWorkspaces();
-          await Promise.all([loadUsage(), loadUsageTrend(), loadTasks(), loadTemplates(), loadKeys(), loadAuditLogs()]);
+          await Promise.all([loadUsage(), loadUsageTrend(), loadTasks(), loadTemplates(), loadKeys(), loadAdminUsers(), loadAuditLogs()]);
           showMessage('数据已刷新。', true);
         }
       } catch (error) {

@@ -119,3 +119,37 @@ class AuditLogOut(BaseModel):
     workspace_id: Optional[int] = None
     metadata: Dict[str, Any]
     created_at: str
+
+
+class AdminLoginRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=64)
+    password: str = Field(..., min_length=1)
+
+
+class AdminLoginResponse(BaseModel):
+    token: str
+    token_type: str = "bearer"
+    expires_at: str
+    user: Dict[str, Any]
+
+
+class AdminUserCreate(BaseModel):
+    username: str = Field(..., min_length=1, max_length=64)
+    password: str = Field(..., min_length=8)
+    role: str = "operator"
+    status: str = "active"
+
+
+class AdminUserUpdate(BaseModel):
+    role: Optional[str] = None
+    status: Optional[str] = None
+    password: Optional[str] = Field(default=None, min_length=8)
+
+
+class AdminUserOut(BaseModel):
+    id: int
+    username: str
+    role: str
+    status: str
+    last_login_at: Optional[str] = None
+    created_at: str

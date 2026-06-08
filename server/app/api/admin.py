@@ -5,14 +5,29 @@ import io
 import secrets
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from server.app.db.session import get_db
-from server.app.models.entities import AuditLog, ApiKey, ExecutionReport, GeneratedScript, GenerationTask, Template, Workspace
+from server.app.models.entities import (
+    AdminSession,
+    AdminUser,
+    AuditLog,
+    ApiKey,
+    ExecutionReport,
+    GeneratedScript,
+    GenerationTask,
+    Template,
+    Workspace,
+)
 from server.app.schemas.admin import (
+    AdminLoginRequest,
+    AdminLoginResponse,
+    AdminUserCreate,
+    AdminUserOut,
+    AdminUserUpdate,
     AuditLogOut,
     ApiKeyCreate,
     ApiKeyCreateResponse,
@@ -29,10 +44,29 @@ from server.app.schemas.admin import (
     WorkspaceOut,
     WorkspaceUpdate,
 )
-from server.app.services.auth import authenticate_admin, hash_api_key
+from server.app.services.auth import (
+    authenticate_admin,
+    create_admin_session,
+    current_admin_actor,
+    hash_api_key,
+    hash_password,
+    verify_password,
+)
 
 
+auth_router = APIRouter(prefix="/api/v1/admin/auth", tags=["admin-auth"])
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"], dependencies=[Depends(authenticate_admin)])
+
+
+def _admin_user_out(row: AdminUser):
+    return AdminUserOut(
+        id=row.id,
+        username=row.username,
+        role=row.role,
+        status=row.status,
+        last_login_at=row.last_login_at.isoformat(timespec="seconds") if row.last_login_at else None,
+        created_at=row.created_at.isoformat(timespec="seconds"),
+    )
 
 
 def _template_out(row: Template):
@@ -61,7 +95,7 @@ def _api_key_out(row: ApiKey):
 def _audit(db: Session, action: str, target_type: str, target_id="", workspace_id=None, metadata=None):
     db.add(
         AuditLog(
-            actor="admin",
+            actor=current_admin_actor(),
             action=action,
             target_type=target_type,
             target_id=str(target_id or ""),
@@ -69,6 +103,91 @@ def _audit(db: Session, action: str, target_type: str, target_id="", workspace_i
             metadata_json=metadata or {},
         )
     )
+
+
+@auth_router.post("/login", response_model=AdminLoginResponse)
+def login(payload: AdminLoginRequest, db: Session = Depends(get_db)):
+    user = db.execute(select(AdminUser).where(AdminUser.username == payload.username)).scalar_one_or_none()
+    if user is None or user.status != "active" or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=403, detail="Invalid username or password.")
+    raw_token, session = create_admin_session(db, user)
+    db.add(
+        AuditLog(
+            actor=user.username,
+            action="admin.login",
+            target_type="admin_user",
+            target_id=str(user.id),
+            metadata_json={"username": user.username},
+        )
+    )
+    db.commit()
+    return AdminLoginResponse(
+        token=raw_token,
+        expires_at=session.expires_at.isoformat(timespec="seconds"),
+        user={"id": user.id, "username": user.username, "role": user.role, "status": user.status},
+    )
+
+
+@router.get("/auth/me")
+def me(admin=Depends(authenticate_admin)):
+    return admin
+
+
+@router.post("/auth/logout")
+def logout(db: Session = Depends(get_db), authorization: str = Header(default="")):
+    # FastAPI already authenticated the request through the router dependency.
+    token = authorization.split(" ", 1)[1].strip() if authorization.lower().startswith("bearer ") else ""
+    if token:
+        session = db.execute(select(AdminSession).where(AdminSession.token_hash == hash_api_key(token))).scalar_one_or_none()
+        if session is not None:
+            session.status = "revoked"
+            _audit(db, "admin.logout", "admin_session", session.id, metadata={"user_id": session.user_id})
+            db.commit()
+    return {"ok": True}
+
+
+@router.get("/admin-users", response_model=list[AdminUserOut])
+def list_admin_users(db: Session = Depends(get_db)):
+    rows = db.execute(select(AdminUser).order_by(AdminUser.id)).scalars().all()
+    return [_admin_user_out(row) for row in rows]
+
+
+@router.post("/admin-users", response_model=AdminUserOut)
+def create_admin_user(payload: AdminUserCreate, db: Session = Depends(get_db)):
+    exists = db.execute(select(AdminUser).where(AdminUser.username == payload.username)).scalar_one_or_none()
+    if exists is not None:
+        raise HTTPException(status_code=409, detail="Admin username already exists.")
+    item = AdminUser(
+        username=payload.username,
+        password_hash=hash_password(payload.password),
+        role=payload.role,
+        status=payload.status,
+    )
+    db.add(item)
+    db.flush()
+    _audit(db, "admin_user.create", "admin_user", item.id, metadata={"username": item.username, "role": item.role})
+    db.commit()
+    db.refresh(item)
+    return _admin_user_out(item)
+
+
+@router.put("/admin-users/{user_id}", response_model=AdminUserOut)
+def update_admin_user(user_id: int, payload: AdminUserUpdate, db: Session = Depends(get_db)):
+    item = db.get(AdminUser, user_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Admin user not found.")
+    changed = payload.model_dump(exclude_none=True)
+    if payload.role is not None:
+        item.role = payload.role
+    if payload.status is not None:
+        item.status = payload.status
+    if payload.password is not None:
+        item.password_hash = hash_password(payload.password)
+        changed["password"] = "updated"
+    _audit(db, "admin_user.update", "admin_user", item.id, metadata={"username": item.username, **changed})
+    db.commit()
+    db.refresh(item)
+    return _admin_user_out(item)
 
 
 @router.get("/workspaces", response_model=list[WorkspaceOut])
