@@ -96,6 +96,7 @@ class AIPanel(QtWidgets.QDockWidget):
         self.generated_payload = None
         self.last_failed_script = ""
         self.last_error = ""
+        self.cloud_templates = {}
         self._task_thread = None
         self._task_worker = None
         self._task_success_handler = None
@@ -151,6 +152,10 @@ class AIPanel(QtWidgets.QDockWidget):
         self.apply_template_button = QtWidgets.QPushButton("套用模板")
         self.apply_template_button.clicked.connect(self._apply_template)
         template_row.addWidget(self.apply_template_button)
+
+        self.sync_templates_button = QtWidgets.QPushButton("同步云端模板")
+        self.sync_templates_button.clicked.connect(self._sync_cloud_templates)
+        template_row.addWidget(self.sync_templates_button)
         layout.addLayout(template_row)
 
         mode_row = QtWidgets.QHBoxLayout()
@@ -342,6 +347,7 @@ class AIPanel(QtWidgets.QDockWidget):
             self.context_button,
             self.regenerate_params_button,
             self.apply_template_button,
+            self.sync_templates_button,
         ):
             if button is self.repair_button:
                 button.setEnabled((not busy) and bool(self.last_failed_script and self.last_error))
@@ -433,7 +439,7 @@ class AIPanel(QtWidgets.QDockWidget):
 
     def _apply_template(self):
         name = self.template_combo.currentText()
-        prompt = get_template_prompt(name)
+        prompt = self.cloud_templates.get(name, "") or get_template_prompt(name)
         if not prompt:
             self._set_status("请选择一个模板。")
             return
@@ -442,6 +448,40 @@ class AIPanel(QtWidgets.QDockWidget):
         if name.startswith("二维草图"):
             self.modeling_mode_combo.setCurrentIndex(1)
         self._set_status("已套用模板：{}。可以直接生成，也可以继续修改需求。".format(name))
+
+    def _sync_cloud_templates(self):
+        self._save_settings()
+        if not self._using_cloud():
+            self._set_status("请先在设置中选择“云端 SaaS 服务”，再同步云端模板。")
+            return
+
+        def success(payload):
+            templates = payload.get("templates", []) if isinstance(payload, dict) else []
+            if not templates:
+                self._set_status("云端没有返回可用模板。")
+                return
+            self.cloud_templates = {
+                item.get("name", ""): item.get("prompt", "")
+                for item in templates
+                if item.get("name") and item.get("prompt")
+            }
+            current_names = {self.template_combo.itemText(i) for i in range(self.template_combo.count())}
+            for name in sorted(self.cloud_templates):
+                if name not in current_names:
+                    self.template_combo.addItem(name)
+            self._set_status("云端模板同步完成：已加载 {} 个模板。".format(len(self.cloud_templates)))
+
+        def failed(error):
+            self._set_status("云端模板同步失败：\n{}".format(self._format_request_error(error)))
+
+        self._start_background_task(
+            "同步云端模板",
+            "正在后台拉取云端模板库，FreeCAD 界面可以继续操作。",
+            lambda: self._build_cloud_client().templates(),
+            success,
+            failed,
+            button=self.sync_templates_button,
+        )
 
     def _modeling_mode(self):
         return self.modeling_mode_combo.currentData() or "3d_solid"

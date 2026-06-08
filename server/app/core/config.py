@@ -23,6 +23,8 @@ class Settings:
     llm_api_key = os.getenv("FREECADAI_LLM_API_KEY", "")
     llm_model = os.getenv("FREECADAI_LLM_MODEL", "gpt-4.1-mini")
     llm_temperature = float(os.getenv("FREECADAI_LLM_TEMPERATURE", "0.1"))
+    redis_url = os.getenv("FREECADAI_REDIS_URL", "redis://127.0.0.1:6379/0")
+    admin_token = os.getenv("FREECADAI_ADMIN_TOKEN", "")
 
 
 settings = Settings()

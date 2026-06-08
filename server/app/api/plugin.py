@@ -3,14 +3,20 @@
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from freecad_ai.templates import TEMPLATES
+
 from server.app.db.session import get_db
+from server.app.models.entities import Template
 from server.app.schemas.plugin import (
     ExecutionReportRequest,
     ExecutionReportResponse,
     GenerateRequest,
     GenerationResponse,
+    PluginTemplate,
+    PluginTemplatesResponse,
     RegenerateRequest,
     RepairRequest,
     VerifyRequest,
@@ -36,6 +42,34 @@ def verify_plugin(
     workspace=Depends(authenticate_plugin),
 ):
     return VerifyResponse(ok=True, workspace_id=workspace.id, message="Plugin API Key is valid.")
+
+
+@router.get("/templates", response_model=PluginTemplatesResponse)
+def plugin_templates(
+    db: Session = Depends(get_db),
+    workspace=Depends(authenticate_plugin),
+):
+    rows = db.execute(
+        select(Template).where(Template.enabled.is_(True)).order_by(Template.category, Template.name)
+    ).scalars().all()
+    if rows:
+        return PluginTemplatesResponse(
+            templates=[
+                PluginTemplate(id=str(row.id), name=row.name, category=row.category, prompt=row.prompt)
+                for row in rows
+            ]
+        )
+    return PluginTemplatesResponse(
+        templates=[
+            PluginTemplate(
+                id="builtin-{}".format(index),
+                name=item["name"],
+                category="builtin",
+                prompt=item["prompt"],
+            )
+            for index, item in enumerate(TEMPLATES, start=1)
+        ]
+    )
 
 
 def _run_generation(db, workspace, action, request, callback):

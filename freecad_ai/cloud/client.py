@@ -23,6 +23,9 @@ class FreeCADAICloudClient:
     def verify(self):
         return self._post("/api/v1/plugin/auth/verify", {"project_id": self.project_id}, timeout=20)
 
+    def templates(self):
+        return self._get("/api/v1/plugin/templates", timeout=30)
+
     def generate(self, prompt, context, modeling_mode):
         return self._post(
             "/api/v1/plugin/generate",
@@ -76,6 +79,25 @@ class FreeCADAICloudClient:
                 "Content-Type": "application/json",
             },
             method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout or self.timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise CloudClientError("Cloud HTTP {}: {}".format(exc.code, detail))
+        except Exception as exc:
+            raise CloudClientError(str(exc))
+
+    def _get(self, path, timeout=None):
+        if not self.base_url:
+            raise CloudClientError("SaaS Base URL is required.")
+        if not self.api_key:
+            raise CloudClientError("SaaS API Key is required.")
+        request = urllib.request.Request(
+            self.base_url + path,
+            headers={"Authorization": "Bearer " + self.api_key},
+            method="GET",
         )
         try:
             with urllib.request.urlopen(request, timeout=timeout or self.timeout) as response:

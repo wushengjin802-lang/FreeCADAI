@@ -22,6 +22,7 @@ services:
     container_name: freecadai-api
     depends_on:
       - mysql
+      - redis
     environment:
       FREECADAI_DATABASE_URL: mysql+pymysql://freecadai:freecadai_password@mysql:3306/freecadai?charset=utf8mb4
       FREECADAI_PLUGIN_API_KEY: dev-plugin-key
@@ -29,8 +30,20 @@ services:
       FREECADAI_LLM_API_KEY: ""
       FREECADAI_LLM_MODEL: gpt-4.1-mini
       FREECADAI_LLM_TEMPERATURE: "0.1"
+      FREECADAI_REDIS_URL: redis://:redis_password@redis:6379/0
+      FREECADAI_ADMIN_TOKEN: dev-admin-token
     ports:
       - "8000:8000"
 
+  redis:
+    image: redis:7.4
+    container_name: freecadai-redis
+    command: ["redis-server", "--requirepass", "redis_password"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - freecadai-redis:/data
+
 volumes:
   freecadai-mysql:
+  freecadai-redis:

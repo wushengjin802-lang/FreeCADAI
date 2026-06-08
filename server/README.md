@@ -11,6 +11,8 @@
 - 保存生成任务和脚本。
 - 接收插件执行结果回传。
 - 使用 MySQL 8.x 保存 SaaS 任务数据。
+- 使用 Redis 做缓存/健康检查基础设施。
+- 提供阶段 5 管理 API：任务历史、任务详情、模板管理、API Key 创建、用量统计。
 
 ## 本地启动
 
@@ -38,6 +40,7 @@ Copy-Item server\.env.example server\.env
 
 ```text
 FREECADAI_LLM_API_KEY=你的模型服务 Key
+FREECADAI_ADMIN_TOKEN=你的管理端 Token
 ```
 
 5. 启动 API：
@@ -66,6 +69,12 @@ docker compose up --build
 dev-plugin-key
 ```
 
+默认管理端 Token：
+
+```text
+dev-admin-token
+```
+
 ## 插件配置
 
 在 FreeCADAI 插件的 `设置` 页：
@@ -77,3 +86,30 @@ dev-plugin-key
 - 云端同步：勾选
 
 保存后回到 `生成` 页，即可通过云端服务生成脚本。脚本仍在本地 FreeCAD 中执行和渲染。
+
+## 阶段 5 管理 API
+
+管理 API 使用：
+
+```http
+Authorization: Bearer <FREECADAI_ADMIN_TOKEN>
+```
+
+已实现接口：
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/api/v1/admin/tasks` | 查询任务历史 |
+| GET | `/api/v1/admin/tasks/{task_id}` | 查询任务详情 |
+| GET | `/api/v1/admin/templates` | 查询模板 |
+| POST | `/api/v1/admin/templates` | 新增模板 |
+| PUT | `/api/v1/admin/templates/{template_id}` | 修改模板 |
+| DELETE | `/api/v1/admin/templates/{template_id}` | 删除模板 |
+| POST | `/api/v1/admin/api-keys` | 创建插件 API Key |
+| GET | `/api/v1/admin/usage` | 查看用量摘要 |
+
+插件模板同步接口：
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/api/v1/plugin/templates` | 插件拉取云端模板 |

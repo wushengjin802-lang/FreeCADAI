@@ -64,3 +64,14 @@ class ExecutionReportRequest(BaseModel):
 class ExecutionReportResponse(BaseModel):
     ok: bool
     report_id: int
+
+
+class PluginTemplate(BaseModel):
+    id: str
+    name: str
+    category: str = "common"
+    prompt: str
+
+
+class PluginTemplatesResponse(BaseModel):
+    templates: List[PluginTemplate]

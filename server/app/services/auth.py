@@ -45,3 +45,10 @@ def authenticate_plugin(db: Session = Depends(get_db), authorization: str = Head
         raise HTTPException(status_code=403, detail="Workspace is not active.")
     db.commit()
     return workspace
+
+
+def authenticate_admin(authorization: str = Header(default="")):
+    token = _extract_bearer(authorization)
+    if not settings.admin_token or not hmac.compare_digest(token, settings.admin_token):
+        raise HTTPException(status_code=403, detail="Invalid admin token.")
+    return True
