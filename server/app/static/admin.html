@@ -502,6 +502,19 @@
       <section id="adminUsers" class="view hidden">
         <div class="panel">
           <div class="panel-head">
+            <h2>修改我的密码</h2>
+            <button class="primary" onclick="changeMyPassword()">修改密码</button>
+          </div>
+          <div class="panel-body">
+            <div class="form-grid">
+              <input id="currentPassword" type="password" placeholder="当前密码" />
+              <input id="newPassword" type="password" placeholder="新密码，至少 8 位" />
+              <div></div>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
             <h2>创建管理员</h2>
             <button class="primary" onclick="createAdminUser()">创建</button>
           </div>
@@ -551,6 +564,7 @@
     const tokenInput = document.getElementById('tokenInput');
     const workspaceFilter = document.getElementById('workspaceFilter');
     const savedToken = localStorage.getItem('freecadai_admin_token') || '';
+    let currentAdmin = null;
     let taskOffset = 0;
     const taskLimit = 50;
     tokenInput.value = savedToken;
@@ -595,6 +609,25 @@
       };
     }
 
+    function hasRole(...roles) {
+      return currentAdmin && roles.includes(currentAdmin.role);
+    }
+
+    function canOperate() {
+      return hasRole('owner', 'operator');
+    }
+
+    function canManageAdmins() {
+      return hasRole('owner');
+    }
+
+    function applyPermissions() {
+      document.querySelectorAll('[data-write-action]').forEach(item => {
+        item.disabled = !canOperate();
+        item.title = canOperate() ? '' : '当前角色只读，不能执行写操作';
+      });
+    }
+
     function selectedWorkspaceId() {
       return workspaceFilter.value ? Number(workspaceFilter.value) : null;
     }
@@ -622,6 +655,12 @@
         throw new Error(text || response.statusText);
       }
       return response.json();
+    }
+
+    async function loadMe() {
+      currentAdmin = await api('/auth/me');
+      applyPermissions();
+      return currentAdmin;
     }
 
     async function loginAdmin() {
@@ -690,6 +729,7 @@
     }
 
     async function createWorkspace() {
+      if (!canOperate()) return showMessage('当前角色无权创建工作区。');
       const data = await api('/workspaces', {
         method: 'POST',
         body: JSON.stringify({
@@ -704,6 +744,7 @@
     }
 
     async function setWorkspaceStatus(id, status) {
+      if (!canOperate()) return showMessage('当前角色无权修改工作区。');
       await api(`/workspaces/${id}`, { method: 'PUT', body: JSON.stringify({ status }) });
       showMessage('工作区状态已更新。', true);
       await loadWorkspaces();
@@ -797,6 +838,7 @@
     }
 
     async function createTemplate() {
+      if (!canOperate()) return showMessage('当前角色无权创建模板。');
       await api('/templates', {
         method: 'POST',
         body: JSON.stringify({
@@ -814,11 +856,13 @@
     }
 
     async function toggleTemplate(id, enabled) {
+      if (!canOperate()) return showMessage('当前角色无权修改模板。');
       await api(`/templates/${id}`, { method: 'PUT', body: JSON.stringify({ enabled }) });
       await loadTemplates();
     }
 
     async function deleteTemplate(id) {
+      if (!canOperate()) return showMessage('当前角色无权删除模板。');
       if (!confirm('确认删除这个模板？')) return;
       await api(`/templates/${id}`, { method: 'DELETE' });
       await loadTemplates();
@@ -831,6 +875,7 @@
     }
 
     async function importTemplates() {
+      if (!canOperate()) return showMessage('当前角色无权导入模板。');
       const text = document.getElementById('tplImport').value.trim();
       const data = JSON.parse(text);
       const payload = Array.isArray(data) ? { templates: data } : data;
@@ -843,6 +888,7 @@
     }
 
     async function createApiKey() {
+      if (!canOperate()) return showMessage('当前角色无权创建 API Key。');
       const workspaceId = Number(document.getElementById('workspaceId').value || selectedWorkspaceId() || 1);
       const data = await api('/api-keys', {
         method: 'POST',
@@ -876,6 +922,10 @@
     }
 
     async function loadAdminUsers() {
+      if (!canManageAdmins()) {
+        document.getElementById('adminUserRows').innerHTML = '<tr><td colspan="7" class="muted">当前角色不能查看管理员列表。</td></tr>';
+        return;
+      }
       const rows = await api('/admin-users');
       const body = document.getElementById('adminUserRows');
       body.innerHTML = rows.map(row => `
@@ -888,12 +938,14 @@
           <td>${row.created_at}</td>
           <td class="row-actions">
             <button class="secondary" onclick="setAdminUserStatus(${row.id}, '${row.status === 'active' ? 'suspended' : 'active'}')">${row.status === 'active' ? '停用' : '启用'}</button>
+            <button class="danger" onclick="resetAdminPassword(${row.id})">重置密码</button>
           </td>
         </tr>
       `).join('') || '<tr><td colspan="7" class="muted">暂无管理员。</td></tr>';
     }
 
     async function createAdminUser() {
+      if (!canManageAdmins()) return showMessage('当前角色无权创建管理员。');
       await api('/admin-users', {
         method: 'POST',
         body: JSON.stringify({
@@ -910,12 +962,34 @@
     }
 
     async function setAdminUserStatus(id, status) {
+      if (!canManageAdmins()) return showMessage('当前角色无权修改管理员。');
       await api(`/admin-users/${id}`, { method: 'PUT', body: JSON.stringify({ status }) });
       showMessage('管理员状态已更新。', true);
       await loadAdminUsers();
     }
 
+    async function resetAdminPassword(id) {
+      if (!canManageAdmins()) return showMessage('当前角色无权重置密码。');
+      const password = prompt('请输入新密码，至少 8 位');
+      if (!password) return;
+      await api(`/admin-users/${id}`, { method: 'PUT', body: JSON.stringify({ password }) });
+      showMessage('管理员密码已重置。', true);
+    }
+
+    async function changeMyPassword() {
+      const currentPassword = document.getElementById('currentPassword').value;
+      const newPassword = document.getElementById('newPassword').value;
+      await api('/auth/password', {
+        method: 'PUT',
+        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+      });
+      document.getElementById('currentPassword').value = '';
+      document.getElementById('newPassword').value = '';
+      showMessage('密码已修改，请使用新密码重新登录。', true);
+    }
+
     async function revokeKey(id) {
+      if (!canOperate()) return showMessage('当前角色无权撤销 API Key。');
       if (!confirm('撤销后插件将不能继续使用这个 Key。确认撤销？')) return;
       await api(`/api-keys/${id}/revoke`, { method: 'POST' });
       showMessage('API Key 已撤销。', true);
@@ -923,6 +997,7 @@
     }
 
     async function enableKey(id) {
+      if (!canOperate()) return showMessage('当前角色无权启用 API Key。');
       await api(`/api-keys/${id}/enable`, { method: 'POST' });
       showMessage('API Key 已启用。', true);
       await loadKeys();
@@ -965,8 +1040,11 @@
       try {
         await loadHealth();
         if (tokenInput.value.trim()) {
+          await loadMe();
           await loadWorkspaces();
-          await Promise.all([loadUsage(), loadUsageTrend(), loadTasks(), loadTemplates(), loadKeys(), loadAdminUsers(), loadAuditLogs()]);
+          const jobs = [loadUsage(), loadUsageTrend(), loadTasks(), loadTemplates(), loadKeys(), loadAuditLogs()];
+          if (canManageAdmins()) jobs.push(loadAdminUsers());
+          await Promise.all(jobs);
           showMessage('数据已刷新。', true);
         }
       } catch (error) {

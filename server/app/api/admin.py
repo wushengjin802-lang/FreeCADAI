@@ -25,6 +25,7 @@ from server.app.models.entities import (
 from server.app.schemas.admin import (
     AdminLoginRequest,
     AdminLoginResponse,
+    AdminPasswordChange,
     AdminUserCreate,
     AdminUserOut,
     AdminUserUpdate,
@@ -48,6 +49,7 @@ from server.app.services.auth import (
     authenticate_admin,
     create_admin_session,
     current_admin_actor,
+    current_admin_principal,
     hash_api_key,
     hash_password,
     verify_password,
@@ -105,6 +107,30 @@ def _audit(db: Session, action: str, target_type: str, target_id="", workspace_i
     )
 
 
+def _require_role(
+    db: Session,
+    allowed_roles: set[str],
+    action: str,
+    target_type: str = "admin_api",
+    authorization: str = "",
+):
+    principal = authenticate_admin(db=db, authorization=authorization) if authorization else current_admin_principal()
+    role = principal.get("role", "")
+    if role not in allowed_roles:
+        db.add(
+            AuditLog(
+                actor=current_admin_actor(),
+                action="permission.denied",
+                target_type=target_type,
+                target_id=action,
+                metadata_json={"required": sorted(allowed_roles), "actual": role},
+            )
+        )
+        db.commit()
+        raise HTTPException(status_code=403, detail="Permission denied.")
+    return principal
+
+
 @auth_router.post("/login", response_model=AdminLoginResponse)
 def login(payload: AdminLoginRequest, db: Session = Depends(get_db)):
     user = db.execute(select(AdminUser).where(AdminUser.username == payload.username)).scalar_one_or_none()
@@ -133,6 +159,20 @@ def me(admin=Depends(authenticate_admin)):
     return admin
 
 
+@router.put("/auth/password")
+def change_own_password(payload: AdminPasswordChange, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    principal = _require_role(db, {"owner", "operator", "viewer"}, "admin.password.change", authorization=authorization)
+    if principal.get("legacy"):
+        raise HTTPException(status_code=400, detail="Legacy admin token cannot change a password.")
+    user = db.get(AdminUser, principal["id"])
+    if user is None or not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=403, detail="Current password is incorrect.")
+    user.password_hash = hash_password(payload.new_password)
+    _audit(db, "admin.password.change", "admin_user", user.id, metadata={"username": user.username})
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/auth/logout")
 def logout(db: Session = Depends(get_db), authorization: str = Header(default="")):
     # FastAPI already authenticated the request through the router dependency.
@@ -147,13 +187,15 @@ def logout(db: Session = Depends(get_db), authorization: str = Header(default=""
 
 
 @router.get("/admin-users", response_model=list[AdminUserOut])
-def list_admin_users(db: Session = Depends(get_db)):
+def list_admin_users(db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner"}, "admin_users.list", "admin_user", authorization)
     rows = db.execute(select(AdminUser).order_by(AdminUser.id)).scalars().all()
     return [_admin_user_out(row) for row in rows]
 
 
 @router.post("/admin-users", response_model=AdminUserOut)
-def create_admin_user(payload: AdminUserCreate, db: Session = Depends(get_db)):
+def create_admin_user(payload: AdminUserCreate, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner"}, "admin_users.create", "admin_user", authorization)
     exists = db.execute(select(AdminUser).where(AdminUser.username == payload.username)).scalar_one_or_none()
     if exists is not None:
         raise HTTPException(status_code=409, detail="Admin username already exists.")
@@ -172,7 +214,8 @@ def create_admin_user(payload: AdminUserCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/admin-users/{user_id}", response_model=AdminUserOut)
-def update_admin_user(user_id: int, payload: AdminUserUpdate, db: Session = Depends(get_db)):
+def update_admin_user(user_id: int, payload: AdminUserUpdate, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner"}, "admin_users.update", "admin_user", authorization)
     item = db.get(AdminUser, user_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Admin user not found.")
@@ -212,7 +255,8 @@ def list_workspaces(db: Session = Depends(get_db)):
 
 
 @router.post("/workspaces", response_model=WorkspaceOut)
-def create_workspace(payload: WorkspaceCreate, db: Session = Depends(get_db)):
+def create_workspace(payload: WorkspaceCreate, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner", "operator"}, "workspaces.create", "workspace", authorization)
     item = Workspace(name=payload.name, plan=payload.plan, status=payload.status)
     db.add(item)
     db.flush()
@@ -231,7 +275,8 @@ def create_workspace(payload: WorkspaceCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/workspaces/{workspace_id}", response_model=WorkspaceOut)
-def update_workspace(workspace_id: int, payload: WorkspaceUpdate, db: Session = Depends(get_db)):
+def update_workspace(workspace_id: int, payload: WorkspaceUpdate, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner", "operator"}, "workspaces.update", "workspace", authorization)
     item = db.get(Workspace, workspace_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Workspace not found.")
@@ -419,7 +464,8 @@ def export_templates(db: Session = Depends(get_db), workspace_id: int | None = N
 
 
 @router.post("/templates/import", response_model=list[TemplateOut])
-def import_templates(payload: TemplateImportRequest, db: Session = Depends(get_db)):
+def import_templates(payload: TemplateImportRequest, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner", "operator"}, "templates.import", "template", authorization)
     imported: list[TemplateOut] = []
     for template in payload.templates:
         existing = db.execute(
@@ -451,7 +497,8 @@ def import_templates(payload: TemplateImportRequest, db: Session = Depends(get_d
 
 
 @router.post("/templates", response_model=TemplateOut)
-def create_template(payload: TemplateCreate, db: Session = Depends(get_db)):
+def create_template(payload: TemplateCreate, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner", "operator"}, "templates.create", "template", authorization)
     item = Template(
         workspace_id=payload.workspace_id,
         name=payload.name,
@@ -468,7 +515,8 @@ def create_template(payload: TemplateCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/templates/{template_id}", response_model=TemplateOut)
-def update_template(template_id: int, payload: TemplateUpdate, db: Session = Depends(get_db)):
+def update_template(template_id: int, payload: TemplateUpdate, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner", "operator"}, "templates.update", "template", authorization)
     item = db.get(Template, template_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Template not found.")
@@ -483,7 +531,8 @@ def update_template(template_id: int, payload: TemplateUpdate, db: Session = Dep
 
 
 @router.delete("/templates/{template_id}")
-def delete_template(template_id: int, db: Session = Depends(get_db)):
+def delete_template(template_id: int, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner", "operator"}, "templates.delete", "template", authorization)
     item = db.get(Template, template_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Template not found.")
@@ -496,7 +545,8 @@ def delete_template(template_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/api-keys", response_model=ApiKeyCreateResponse)
-def create_api_key(payload: ApiKeyCreate, db: Session = Depends(get_db)):
+def create_api_key(payload: ApiKeyCreate, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner", "operator"}, "api_keys.create", "api_key", authorization)
     workspace = db.get(Workspace, payload.workspace_id)
     if workspace is None:
         workspace = Workspace(id=payload.workspace_id, name="Workspace {}".format(payload.workspace_id))
@@ -528,7 +578,8 @@ def list_api_keys(db: Session = Depends(get_db), workspace_id: int | None = None
 
 
 @router.post("/api-keys/{key_id}/revoke", response_model=ApiKeyOut)
-def revoke_api_key(key_id: int, db: Session = Depends(get_db)):
+def revoke_api_key(key_id: int, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner", "operator"}, "api_keys.revoke", "api_key", authorization)
     item = db.get(ApiKey, key_id)
     if item is None:
         raise HTTPException(status_code=404, detail="API key not found.")
@@ -540,7 +591,8 @@ def revoke_api_key(key_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/api-keys/{key_id}/enable", response_model=ApiKeyOut)
-def enable_api_key(key_id: int, db: Session = Depends(get_db)):
+def enable_api_key(key_id: int, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner", "operator"}, "api_keys.enable", "api_key", authorization)
     item = db.get(ApiKey, key_id)
     if item is None:
         raise HTTPException(status_code=404, detail="API key not found.")

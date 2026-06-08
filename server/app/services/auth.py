@@ -16,6 +16,7 @@ from server.app.models.entities import AdminSession, AdminUser, ApiKey, Workspac
 
 
 _admin_actor = ContextVar("admin_actor", default="admin")
+_admin_principal = ContextVar("admin_principal", default={"id": None, "username": "admin", "role": "owner", "legacy": True})
 
 
 def hash_api_key(api_key):
@@ -47,6 +48,10 @@ def _extract_bearer(authorization):
 
 def current_admin_actor():
     return _admin_actor.get()
+
+
+def current_admin_principal():
+    return _admin_principal.get()
 
 
 def authenticate_plugin(db: Session = Depends(get_db), authorization: str = Header(default="")):
@@ -118,7 +123,11 @@ def authenticate_admin(db: Session = Depends(get_db), authorization: str = Heade
         user = db.get(AdminUser, session.user_id)
         if user is None or user.status != "active":
             raise HTTPException(status_code=403, detail="Admin user is not active.")
+        principal = {"id": user.id, "username": user.username, "role": user.role, "legacy": False}
         _admin_actor.set(user.username)
-        return {"id": user.id, "username": user.username, "role": user.role, "legacy": False}
+        _admin_principal.set(principal)
+        return principal
+    principal = {"id": None, "username": "legacy-admin-token", "role": "owner", "legacy": True}
     _admin_actor.set("legacy-admin-token")
-    return {"id": None, "username": "legacy-admin-token", "role": "owner", "legacy": True}
+    _admin_principal.set(principal)
+    return principal

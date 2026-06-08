@@ -48,6 +48,14 @@ def admin_page():
     )
 
 
+@app.get("/login", response_class=HTMLResponse)
+def login_page():
+    return HTMLResponse(
+        (STATIC_DIR / "login.html").read_text(encoding="utf-8"),
+        media_type="text/html; charset=utf-8",
+    )
+
+
 @app.on_event("startup")
 def startup():
     if settings.auto_migrate:
