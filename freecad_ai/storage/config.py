@@ -19,6 +19,13 @@ DEFAULT_CONFIG = {
     "cloud_api_key": "",
     "cloud_project_id": "",
     "cloud_sync_history": True,
+    "cloud_account_token": "",
+    "cloud_account_username": "",
+    "cloud_workspace_id": "",
+    "cloud_workspace_name": "",
+    "cloud_workspace_plan": "",
+    "cloud_workspace_status": "",
+    "cloud_key_status": "",
 }
 
 

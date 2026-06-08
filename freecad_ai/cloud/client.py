@@ -65,6 +65,24 @@ class FreeCADAICloudClient:
     def execution_report(self, report):
         return self._post("/api/v1/plugin/execution-reports", report, timeout=20)
 
+    def account_login(self, username, password):
+        return self._post_public(
+            "/api/v1/plugin/account/login",
+            {"username": username, "password": password},
+            timeout=20,
+        )
+
+    def account_workspaces(self, account_token):
+        return self._get_with_token("/api/v1/plugin/account/workspaces", account_token, timeout=30)
+
+    def bind_workspace(self, account_token, workspace_id, key_name="FreeCAD Plugin Key"):
+        return self._post_with_token(
+            "/api/v1/plugin/account/bind-workspace",
+            {"workspace_id": int(workspace_id), "key_name": key_name},
+            account_token,
+            timeout=30,
+        )
+
     def _post(self, path, payload, timeout=None):
         if not self.base_url:
             raise CloudClientError("SaaS Base URL is required.")
@@ -89,6 +107,45 @@ class FreeCADAICloudClient:
         except Exception as exc:
             raise CloudClientError(str(exc))
 
+    def _post_public(self, path, payload, timeout=None):
+        if not self.base_url:
+            raise CloudClientError("SaaS Base URL is required.")
+        request = urllib.request.Request(
+            self.base_url + path,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        return self._open_json(request, timeout or self.timeout)
+
+    def _post_with_token(self, path, payload, token, timeout=None):
+        if not self.base_url:
+            raise CloudClientError("SaaS Base URL is required.")
+        if not token:
+            raise CloudClientError("Account token is required.")
+        request = urllib.request.Request(
+            self.base_url + path,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": "Bearer " + token,
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        return self._open_json(request, timeout or self.timeout)
+
+    def _get_with_token(self, path, token, timeout=None):
+        if not self.base_url:
+            raise CloudClientError("SaaS Base URL is required.")
+        if not token:
+            raise CloudClientError("Account token is required.")
+        request = urllib.request.Request(
+            self.base_url + path,
+            headers={"Authorization": "Bearer " + token},
+            method="GET",
+        )
+        return self._open_json(request, timeout or self.timeout)
+
     def _get(self, path, timeout=None):
         if not self.base_url:
             raise CloudClientError("SaaS Base URL is required.")
@@ -101,6 +158,16 @@ class FreeCADAICloudClient:
         )
         try:
             with urllib.request.urlopen(request, timeout=timeout or self.timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise CloudClientError("Cloud HTTP {}: {}".format(exc.code, detail))
+        except Exception as exc:
+            raise CloudClientError(str(exc))
+
+    def _open_json(self, request, timeout):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")

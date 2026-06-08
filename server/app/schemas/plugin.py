@@ -13,6 +13,10 @@ class VerifyResponse(BaseModel):
     ok: bool
     workspace_id: int
     message: str
+    workspace_name: str = ""
+    workspace_plan: str = ""
+    workspace_status: str = ""
+    key_status: str = "active"
 
 
 class GenerateRequest(BaseModel):
@@ -75,3 +79,37 @@ class PluginTemplate(BaseModel):
 
 class PluginTemplatesResponse(BaseModel):
     templates: List[PluginTemplate]
+
+
+class PluginAccountLoginRequest(BaseModel):
+    username: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1)
+
+
+class PluginAccountLoginResponse(BaseModel):
+    token: str
+    expires_at: str
+    user: Dict[str, Any]
+
+
+class PluginWorkspaceItem(BaseModel):
+    id: int
+    name: str
+    plan: str
+    status: str
+    api_key_count: int = 0
+
+
+class PluginWorkspacesResponse(BaseModel):
+    workspaces: List[PluginWorkspaceItem]
+
+
+class PluginBindWorkspaceRequest(BaseModel):
+    workspace_id: int
+    key_name: str = "FreeCAD Plugin Key"
+
+
+class PluginBindWorkspaceResponse(BaseModel):
+    api_key: str
+    prefix: str
+    workspace: PluginWorkspaceItem

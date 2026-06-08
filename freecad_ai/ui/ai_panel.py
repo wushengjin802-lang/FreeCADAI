@@ -294,6 +294,47 @@ class AIPanel(QtWidgets.QDockWidget):
         cloud_form.addRow("云端同步", self.cloud_sync_history_checkbox)
         layout.addLayout(cloud_form)
 
+        layout.addWidget(self._section_title("云端账号与工作区绑定"))
+        account_form = QtWidgets.QFormLayout()
+        self.cloud_account_username_input = QtWidgets.QLineEdit(self.config.get("cloud_account_username", ""))
+        self.cloud_account_password_input = QtWidgets.QLineEdit("")
+        self.cloud_account_password_input.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.cloud_workspace_combo = QtWidgets.QComboBox()
+        saved_workspace_id = str(self.config.get("cloud_workspace_id", "") or "")
+        saved_workspace_name = self.config.get("cloud_workspace_name", "")
+        if saved_workspace_id:
+            self.cloud_workspace_combo.addItem(
+                "{} - {}".format(saved_workspace_id, saved_workspace_name or "已绑定工作区"),
+                saved_workspace_id,
+            )
+        account_form.addRow("账号用户名", self.cloud_account_username_input)
+        account_form.addRow("账号密码", self.cloud_account_password_input)
+        account_form.addRow("绑定工作区", self.cloud_workspace_combo)
+        layout.addLayout(account_form)
+
+        account_row = QtWidgets.QHBoxLayout()
+        self.cloud_login_button = QtWidgets.QPushButton("登录账号")
+        self.cloud_login_button.clicked.connect(self._cloud_account_login)
+        account_row.addWidget(self.cloud_login_button)
+
+        self.cloud_refresh_workspaces_button = QtWidgets.QPushButton("刷新工作区")
+        self.cloud_refresh_workspaces_button.clicked.connect(self._cloud_refresh_workspaces)
+        account_row.addWidget(self.cloud_refresh_workspaces_button)
+
+        self.cloud_bind_workspace_button = QtWidgets.QPushButton("绑定工作区")
+        self.cloud_bind_workspace_button.clicked.connect(self._cloud_bind_workspace)
+        account_row.addWidget(self.cloud_bind_workspace_button)
+
+        self.cloud_verify_button = QtWidgets.QPushButton("检查连接")
+        self.cloud_verify_button.clicked.connect(self._cloud_verify_connection)
+        account_row.addWidget(self.cloud_verify_button)
+        layout.addLayout(account_row)
+
+        self.cloud_binding_status_label = QtWidgets.QLabel("")
+        self.cloud_binding_status_label.setWordWrap(True)
+        layout.addWidget(self.cloud_binding_status_label)
+        self._update_cloud_binding_status()
+
         self.save_settings_button = QtWidgets.QPushButton("保存设置")
         self.save_settings_button.clicked.connect(self._save_settings)
         layout.addWidget(self.save_settings_button)
@@ -331,12 +372,201 @@ class AIPanel(QtWidgets.QDockWidget):
             "cloud_api_key": self.cloud_api_key_input.text().strip(),
             "cloud_project_id": self.cloud_project_id_input.text().strip(),
             "cloud_sync_history": self.cloud_sync_history_checkbox.isChecked(),
+            "cloud_account_token": self.config.get("cloud_account_token", ""),
+            "cloud_account_username": self.cloud_account_username_input.text().strip(),
+            "cloud_workspace_id": str(self.cloud_workspace_combo.currentData() or self.config.get("cloud_workspace_id", "")),
+            "cloud_workspace_name": self.config.get("cloud_workspace_name", ""),
+            "cloud_workspace_plan": self.config.get("cloud_workspace_plan", ""),
+            "cloud_workspace_status": self.config.get("cloud_workspace_status", ""),
+            "cloud_key_status": self.config.get("cloud_key_status", ""),
         }
 
     def _save_settings(self):
         self.config = save_config(self._current_settings())
         mode_name = "云端 SaaS 服务" if self._using_cloud() else "本地直连 LLM"
         self._set_status("设置已保存。下一次生成会使用：{}。".format(mode_name))
+
+    def _selected_cloud_workspace_id(self):
+        if not hasattr(self, "cloud_workspace_combo"):
+            return str(self.config.get("cloud_workspace_id", "") or "")
+        return str(self.cloud_workspace_combo.currentData() or self.config.get("cloud_workspace_id", "") or "")
+
+    def _select_cloud_workspace(self, workspace_id):
+        if not hasattr(self, "cloud_workspace_combo"):
+            return
+        workspace_id = str(workspace_id or "")
+        if not workspace_id:
+            return
+        index = self.cloud_workspace_combo.findData(workspace_id)
+        if index >= 0:
+            self.cloud_workspace_combo.setCurrentIndex(index)
+
+    def _workspace_label(self, workspace):
+        parts = [str(workspace.get("id", "")), workspace.get("name", "")]
+        detail = []
+        if workspace.get("plan"):
+            detail.append(workspace.get("plan"))
+        if workspace.get("status"):
+            detail.append(workspace.get("status"))
+        label = " - ".join([part for part in parts if part])
+        if detail:
+            label = "{} ({})".format(label, " / ".join(detail))
+        return label or "未命名工作区"
+
+    def _remember_cloud_workspace(self, workspace):
+        workspace = workspace or {}
+        if not workspace:
+            return
+        workspace_id = str(workspace.get("id", "") or "")
+        if workspace_id:
+            self.config["cloud_workspace_id"] = workspace_id
+        self.config["cloud_workspace_name"] = workspace.get("name", "") or ""
+        self.config["cloud_workspace_plan"] = workspace.get("plan", "") or ""
+        self.config["cloud_workspace_status"] = workspace.get("status", "") or ""
+        if workspace_id:
+            self._select_cloud_workspace(workspace_id)
+
+    def _update_cloud_binding_status(self):
+        if not hasattr(self, "cloud_binding_status_label"):
+            return
+        username = self.config.get("cloud_account_username", "") or self.cloud_account_username_input.text().strip()
+        workspace_id = self.config.get("cloud_workspace_id", "")
+        workspace_name = self.config.get("cloud_workspace_name", "")
+        workspace_plan = self.config.get("cloud_workspace_plan", "")
+        workspace_status = self.config.get("cloud_workspace_status", "")
+        key_status = self.config.get("cloud_key_status", "")
+        api_key_status = "已配置" if self.cloud_api_key_input.text().strip() else "未配置"
+        account_status = "已登录：{}".format(username) if self.config.get("cloud_account_token") else "未登录云端账号"
+        workspace_status_text = "未绑定工作区"
+        if workspace_id:
+            workspace_status_text = "{} {}".format(workspace_id, workspace_name or "").strip()
+        lines = [
+            "账号状态：{}".format(account_status),
+            "当前工作区：{}".format(workspace_status_text),
+            "套餐/状态：{} / {}".format(workspace_plan or "未知", workspace_status or "未知"),
+            "插件 API Key：{}，Key 状态：{}".format(api_key_status, key_status or "未知"),
+        ]
+        self.cloud_binding_status_label.setText("\n".join(lines))
+
+    def _cloud_account_login(self):
+        username = self.cloud_account_username_input.text().strip()
+        password = self.cloud_account_password_input.text()
+        if not username or not password:
+            self._set_status("请先填写云端账号用户名和密码。")
+            return
+        self._save_settings()
+
+        def on_success(payload):
+            self.config["cloud_account_token"] = payload.get("token", "")
+            self.config["cloud_account_username"] = username
+            self.config = save_config(self.config)
+            self.cloud_account_password_input.clear()
+            self._update_cloud_binding_status()
+            self._set_status("账号登录成功。现在可以刷新工作区列表，再选择要绑定的工作区。")
+
+        self._start_background_task(
+            "云端账号登录",
+            "正在登录云端账号，请稍候...",
+            lambda: self._build_cloud_client().account_login(username, password),
+            on_success,
+            lambda error: self._set_status(format_cloud_error(error)),
+            button=self.cloud_login_button,
+        )
+
+    def _cloud_refresh_workspaces(self):
+        self._save_settings()
+        token = self.config.get("cloud_account_token", "")
+        if not token:
+            self._set_status("请先登录云端账号，然后再刷新工作区。")
+            return
+
+        def on_success(payload):
+            workspaces = payload.get("workspaces", [])
+            current_id = self._selected_cloud_workspace_id()
+            self.cloud_workspace_combo.clear()
+            for workspace in workspaces:
+                self.cloud_workspace_combo.addItem(self._workspace_label(workspace), str(workspace.get("id", "")))
+            self._select_cloud_workspace(current_id)
+            if not current_id and workspaces:
+                self.cloud_workspace_combo.setCurrentIndex(0)
+            self._update_cloud_binding_status()
+            self._set_status("工作区列表已刷新，共找到 {} 个工作区。".format(len(workspaces)))
+
+        self._start_background_task(
+            "刷新工作区",
+            "正在从云端读取可用工作区...",
+            lambda: self._build_cloud_client().account_workspaces(token),
+            on_success,
+            lambda error: self._set_status(format_cloud_error(error)),
+            button=self.cloud_refresh_workspaces_button,
+        )
+
+    def _cloud_bind_workspace(self):
+        self._save_settings()
+        token = self.config.get("cloud_account_token", "")
+        workspace_id = self._selected_cloud_workspace_id()
+        if not token:
+            self._set_status("请先登录云端账号，然后再绑定工作区。")
+            return
+        if not workspace_id:
+            self._set_status("请先选择一个工作区。")
+            return
+        username = self.config.get("cloud_account_username", "") or self.cloud_account_username_input.text().strip()
+        key_name = "FreeCADAI Plugin"
+        if username:
+            key_name = "{} - {}".format(key_name, username)
+
+        def on_success(payload):
+            api_key = payload.get("api_key", "")
+            workspace = payload.get("workspace", {})
+            if api_key:
+                self.cloud_api_key_input.setText(api_key)
+                self.config["cloud_api_key"] = api_key
+            self.config["cloud_key_status"] = "active"
+            self._remember_cloud_workspace(workspace)
+            self.config = save_config(self._current_settings())
+            self.service_mode_combo.setCurrentIndex(max(0, self.service_mode_combo.findData("cloud")))
+            self.config["service_mode"] = "cloud"
+            self.config = save_config(self.config)
+            self._update_cloud_binding_status()
+            self._set_status("工作区绑定完成，插件 API Key 已写入配置。现在可以使用云端 SaaS 服务生成模型。")
+
+        self._start_background_task(
+            "绑定工作区",
+            "正在为所选工作区创建插件 API Key...",
+            lambda: self._build_cloud_client().bind_workspace(token, workspace_id, key_name),
+            on_success,
+            lambda error: self._set_status(format_cloud_error(error)),
+            button=self.cloud_bind_workspace_button,
+        )
+
+    def _cloud_verify_connection(self):
+        self._save_settings()
+        if not self.config.get("cloud_api_key", ""):
+            self._set_status("请先绑定工作区，或手动填写 SaaS API Key。")
+            return
+
+        def on_success(payload):
+            workspace = {
+                "id": payload.get("workspace_id", ""),
+                "name": payload.get("workspace_name", ""),
+                "plan": payload.get("workspace_plan", ""),
+                "status": payload.get("workspace_status", ""),
+            }
+            self.config["cloud_key_status"] = payload.get("key_status", "")
+            self._remember_cloud_workspace(workspace)
+            self.config = save_config(self._current_settings())
+            self._update_cloud_binding_status()
+            self._set_status("云端连接正常：当前工作区为 {}。".format(self.config.get("cloud_workspace_name") or self.config.get("cloud_workspace_id")))
+
+        self._start_background_task(
+            "检查云端连接",
+            "正在检查云端连接和 API Key 状态...",
+            lambda: self._build_cloud_client().verify(),
+            on_success,
+            lambda error: self._set_status(format_cloud_error(error)),
+            button=self.cloud_verify_button,
+        )
 
     def _set_busy(self, busy):
         for button in (
@@ -352,6 +582,16 @@ class AIPanel(QtWidgets.QDockWidget):
             if button is self.repair_button:
                 button.setEnabled((not busy) and bool(self.last_failed_script and self.last_error))
             else:
+                button.setEnabled(not busy)
+        for optional in (
+            "cloud_login_button",
+            "cloud_refresh_workspaces_button",
+            "cloud_bind_workspace_button",
+            "cloud_verify_button",
+            "save_settings_button",
+        ):
+            button = getattr(self, optional, None)
+            if button is not None:
                 button.setEnabled(not busy)
 
     def _start_button_spinner(self, button):
