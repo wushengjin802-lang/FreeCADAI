@@ -39,6 +39,20 @@ class ApiKeyCreateResponse(BaseModel):
     prefix: str
 
 
+class ApiKeyOut(BaseModel):
+    id: int
+    workspace_id: int
+    name: str
+    prefix: str
+    status: str
+    last_used_at: Optional[str] = None
+    created_at: str
+
+
+class TemplateImportRequest(BaseModel):
+    templates: List[TemplateCreate]
+
+
 class TaskListItem(BaseModel):
     id: int
     workspace_id: int
@@ -59,6 +73,14 @@ class TaskDetail(BaseModel):
 
 
 class UsageSummary(BaseModel):
+    task_count: int
+    succeeded_count: int
+    failed_count: int
+    report_count: int
+
+
+class UsageDailyItem(BaseModel):
+    day: str
     task_count: int
     succeeded_count: int
     failed_count: int
