@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<package format="1">
+  <name>FreeCADAI</name>
+  <version>0.0.1</version>
+  <date>2026-06-05</date>
+  <description>AI-assisted FreeCAD workbench prototype for natural-language 3D modeling.</description>
+  <maintainer email="">FreeCADAI Team</maintainer>
+  <license>MIT</license>
+  <url type="repository">local</url>
+  <content>
+    <workbench>FreeCADAI</workbench>
+  </content>
+</package>
+
