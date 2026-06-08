@@ -18,6 +18,19 @@ app.include_router(plugin_router)
 app.include_router(admin_router)
 
 
+@app.get("/")
+def root():
+    return {
+        "ok": True,
+        "service": settings.app_name,
+        "message": "FreeCADAI SaaS is running.",
+        "health": "/health",
+        "docs": "/docs",
+        "plugin_base": "/api/v1/plugin",
+        "admin_base": "/api/v1/admin",
+    }
+
+
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
