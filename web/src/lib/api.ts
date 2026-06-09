@@ -1,0 +1,159 @@
+import type {
+  AdminPrincipal,
+  AdminUser,
+  ApiKey,
+  ApiKeyCreateResponse,
+  AuditLog,
+  BillingPlan,
+  BillingSummary,
+  Health,
+  LoginResponse,
+  TaskDetail,
+  TaskListItem,
+  Template,
+  UsageByModelItem,
+  UsageDailyItem,
+  UsageSummary,
+  Workspace
+} from "./types";
+
+type QueryValue = string | number | boolean | null | undefined;
+
+function currentApiPrefix() {
+  if (process.env.NEXT_PUBLIC_API_PREFIX) return process.env.NEXT_PUBLIC_API_PREFIX;
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/freecadai")) {
+    return "/freecadai";
+  }
+  return "";
+}
+
+function appPath(path: string) {
+  return `${currentApiPrefix()}${path}`;
+}
+
+function toQuery(params: Record<string, QueryValue>) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") search.set(key, String(value));
+  });
+  const text = search.toString();
+  return text ? `?${text}` : "";
+}
+
+async function parseError(response: Response) {
+  const text = await response.text();
+  try {
+    const data = JSON.parse(text) as { detail?: unknown };
+    return typeof data.detail === "string" ? data.detail : text;
+  } catch {
+    return text || response.statusText;
+  }
+}
+
+export async function apiFetch<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(appPath(path), {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...(init.headers || {})
+    }
+  });
+  if (!response.ok) throw new Error(await parseError(response));
+  return response.json() as Promise<T>;
+}
+
+export async function login(username: string, password: string) {
+  const response = await fetch(appPath("/api/v1/admin/auth/login"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password })
+  });
+  if (!response.ok) throw new Error(await parseError(response));
+  return response.json() as Promise<LoginResponse>;
+}
+
+export const adminApi = {
+  me: (token: string) => apiFetch<AdminPrincipal>("/api/v1/admin/auth/me", token),
+  logout: (token: string) => apiFetch<{ ok: boolean }>("/api/v1/admin/auth/logout", token, { method: "POST" }),
+  health: async () => {
+    const response = await fetch(appPath("/health"));
+    if (!response.ok) throw new Error(await parseError(response));
+    return response.json() as Promise<Health>;
+  },
+  workspaces: (token: string) => apiFetch<Workspace[]>("/api/v1/admin/workspaces", token),
+  createWorkspace: (token: string, body: { name: string; plan: string; status: string }) =>
+    apiFetch<Workspace>("/api/v1/admin/workspaces", token, { method: "POST", body: JSON.stringify(body) }),
+  updateWorkspace: (token: string, id: number, body: Partial<Pick<Workspace, "name" | "plan" | "status">>) =>
+    apiFetch<Workspace>(`/api/v1/admin/workspaces/${id}`, token, { method: "PUT", body: JSON.stringify(body) }),
+  usage: (token: string, workspaceId?: number | null) =>
+    apiFetch<UsageSummary>(`/api/v1/admin/usage${toQuery({ workspace_id: workspaceId })}`, token),
+  usageDaily: (token: string, workspaceId?: number | null) =>
+    apiFetch<UsageDailyItem[]>(`/api/v1/admin/usage/daily${toQuery({ days: 14, workspace_id: workspaceId })}`, token),
+  usageByModel: (token: string, workspaceId?: number | null) =>
+    apiFetch<UsageByModelItem[]>(`/api/v1/admin/usage/by-model${toQuery({ workspace_id: workspaceId })}`, token),
+  billingPlans: (token: string) => apiFetch<BillingPlan[]>("/api/v1/admin/billing/plans", token),
+  billingSummary: (token: string, workspaceId?: number | null) =>
+    apiFetch<BillingSummary>(`/api/v1/admin/billing/summary${toQuery({ workspace_id: workspaceId })}`, token),
+  createCheckout: (token: string, body: { workspace_id: number; plan: string }) =>
+    apiFetch<{ ok: boolean; provider: string; checkout_url?: string | null; message: string }>("/api/v1/admin/billing/checkout", token, { method: "POST", body: JSON.stringify(body) }),
+  tasks: (
+    token: string,
+    params: { limit: number; offset: number; q?: string; status?: string; action?: string; modeling_mode?: string; workspace_id?: number | null }
+  ) => apiFetch<TaskListItem[]>(`/api/v1/admin/tasks${toQuery(params)}`, token),
+  taskDetail: (token: string, id: number) => apiFetch<TaskDetail>(`/api/v1/admin/tasks/${id}`, token),
+  cancelTask: (token: string, id: number) => apiFetch<{ ok: boolean; task_id: number; status: string; message?: string }>(`/api/v1/admin/tasks/${id}/cancel`, token, { method: "POST" }),
+  retryTask: (token: string, id: number) => apiFetch<{ ok: boolean; task_id: number; status: string; message?: string }>(`/api/v1/admin/tasks/${id}/retry`, token, { method: "POST" }),
+  templates: (token: string, workspaceId?: number | null) =>
+    apiFetch<Template[]>(`/api/v1/admin/templates${toQuery({ include_disabled: true, workspace_id: workspaceId })}`, token),
+  createTemplate: (token: string, body: Omit<Template, "id">) =>
+    apiFetch<Template>("/api/v1/admin/templates", token, { method: "POST", body: JSON.stringify(body) }),
+  updateTemplate: (token: string, id: number, body: Partial<Omit<Template, "id" | "workspace_id">>) =>
+    apiFetch<Template>(`/api/v1/admin/templates/${id}`, token, { method: "PUT", body: JSON.stringify(body) }),
+  deleteTemplate: (token: string, id: number) =>
+    apiFetch<{ ok: boolean }>(`/api/v1/admin/templates/${id}`, token, { method: "DELETE" }),
+  importTemplates: (token: string, templates: Array<Omit<Template, "id">>) =>
+    apiFetch<Template[]>("/api/v1/admin/templates/import", token, { method: "POST", body: JSON.stringify({ templates }) }),
+  exportTemplates: (token: string, workspaceId?: number | null) =>
+    apiFetch<Template[]>(`/api/v1/admin/templates/export${toQuery({ workspace_id: workspaceId })}`, token),
+  apiKeys: (token: string, workspaceId?: number | null) =>
+    apiFetch<ApiKey[]>(`/api/v1/admin/api-keys${toQuery({ workspace_id: workspaceId })}`, token),
+  createApiKey: (token: string, body: { workspace_id: number; name: string }) =>
+    apiFetch<ApiKeyCreateResponse>("/api/v1/admin/api-keys", token, { method: "POST", body: JSON.stringify(body) }),
+  revokeApiKey: (token: string, id: number) =>
+    apiFetch<ApiKey>(`/api/v1/admin/api-keys/${id}/revoke`, token, { method: "POST" }),
+  enableApiKey: (token: string, id: number) =>
+    apiFetch<ApiKey>(`/api/v1/admin/api-keys/${id}/enable`, token, { method: "POST" }),
+  adminUsers: (token: string) => apiFetch<AdminUser[]>("/api/v1/admin/admin-users", token),
+  createAdminUser: (token: string, body: { username: string; password: string; role: string; status: string }) =>
+    apiFetch<AdminUser>("/api/v1/admin/admin-users", token, { method: "POST", body: JSON.stringify(body) }),
+  updateAdminUser: (token: string, id: number, body: Partial<{ role: string; status: string; password: string }>) =>
+    apiFetch<AdminUser>(`/api/v1/admin/admin-users/${id}`, token, { method: "PUT", body: JSON.stringify(body) }),
+  changePassword: (token: string, body: { current_password: string; new_password: string }) =>
+    apiFetch<{ ok: boolean }>("/api/v1/admin/auth/password", token, { method: "PUT", body: JSON.stringify(body) }),
+  auditLogs: (token: string, workspaceId?: number | null) =>
+    apiFetch<AuditLog[]>(`/api/v1/admin/audit-logs${toQuery({ limit: 100, workspace_id: workspaceId })}`, token)
+};
+
+export function downloadJson(filename: string, data: unknown) {
+  downloadBlob(filename, new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" }));
+}
+
+export function downloadBlob(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function exportTasksCsv(token: string, params: Record<string, QueryValue>) {
+  const response = await fetch(appPath(`/api/v1/admin/tasks/export${toQuery({ ...params, limit: 1000, offset: 0 })}`), {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) throw new Error(await parseError(response));
+  downloadBlob("freecadai_tasks.csv", await response.blob());
+}

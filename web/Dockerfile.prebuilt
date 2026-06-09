@@ -1,0 +1,14 @@
+FROM node:24-alpine
+
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
+
+COPY web/.next ./.next
+COPY web/public ./public
+COPY web/next.config.mjs ./next.config.mjs
+
+EXPOSE 3000
+CMD ["npx", "next", "start", "--hostname", "0.0.0.0", "--port", "3000"]

@@ -1,6 +1,7 @@
 """Minimal client for the FreeCADAI SaaS plugin API."""
 
 import json
+import time
 import urllib.error
 import urllib.request
 
@@ -19,6 +20,10 @@ class FreeCADAICloudClient:
         self.api_key = api_key.strip()
         self.project_id = project_id.strip()
         self.timeout = timeout
+        self.poll_timeout = 900
+        self.poll_interval = 2.0
+        self.on_task_submitted = None
+        self.should_cancel = None
 
     def verify(self):
         return self._post("/api/v1/plugin/auth/verify", {"project_id": self.project_id}, timeout=20)
@@ -27,19 +32,26 @@ class FreeCADAICloudClient:
         return self._get("/api/v1/plugin/templates", timeout=30)
 
     def generate(self, prompt, context, modeling_mode):
+        return self._submit_and_wait(self.submit_generate(prompt, context, modeling_mode))
+
+    def submit_generate(self, prompt, context, modeling_mode):
         return self._post(
-            "/api/v1/plugin/generate",
+            "/api/v1/plugin/generate/submit",
             {
                 "prompt": prompt,
                 "context": context,
                 "modeling_mode": modeling_mode,
                 "project_id": self.project_id,
             },
+            timeout=20,
         )
 
     def repair(self, prompt, context, failed_script, error_text, modeling_mode):
+        return self._submit_and_wait(self.submit_repair(prompt, context, failed_script, error_text, modeling_mode))
+
+    def submit_repair(self, prompt, context, failed_script, error_text, modeling_mode):
         return self._post(
-            "/api/v1/plugin/repair",
+            "/api/v1/plugin/repair/submit",
             {
                 "prompt": prompt,
                 "context": context,
@@ -48,11 +60,15 @@ class FreeCADAICloudClient:
                 "modeling_mode": modeling_mode,
                 "project_id": self.project_id,
             },
+            timeout=20,
         )
 
     def regenerate(self, prompt, context, parameters_text, modeling_mode):
+        return self._submit_and_wait(self.submit_regenerate(prompt, context, parameters_text, modeling_mode))
+
+    def submit_regenerate(self, prompt, context, parameters_text, modeling_mode):
         return self._post(
-            "/api/v1/plugin/regenerate",
+            "/api/v1/plugin/regenerate/submit",
             {
                 "prompt": prompt,
                 "context": context,
@@ -60,10 +76,50 @@ class FreeCADAICloudClient:
                 "modeling_mode": modeling_mode,
                 "project_id": self.project_id,
             },
+            timeout=20,
         )
+
+    def _old_generate_payload(self, prompt, context, modeling_mode):
+        return {
+            "prompt": prompt,
+            "context": context,
+            "modeling_mode": modeling_mode,
+            "project_id": self.project_id,
+        }
 
     def execution_report(self, report):
         return self._post("/api/v1/plugin/execution-reports", report, timeout=20)
+
+    def task_status(self, task_id):
+        return self._get("/api/v1/plugin/tasks/{}".format(int(task_id)), timeout=20)
+
+    def cancel_task(self, task_id):
+        return self._post("/api/v1/plugin/tasks/{}/cancel".format(int(task_id)), {}, timeout=20)
+
+    def retry_task(self, task_id):
+        return self._post("/api/v1/plugin/tasks/{}/retry".format(int(task_id)), {}, timeout=20)
+
+    def _submit_and_wait(self, submitted):
+        task_id = submitted.get("task_id")
+        if not task_id:
+            raise CloudClientError("Cloud task submission did not return task_id: {}".format(submitted))
+        if self.on_task_submitted:
+            self.on_task_submitted(task_id)
+        deadline = time.time() + self.poll_timeout
+        last_status = submitted.get("status", "queued")
+        while time.time() < deadline:
+            if self.should_cancel and self.should_cancel():
+                self.cancel_task(task_id)
+                raise CloudClientError("Cloud task canceled by user. task_id={}".format(task_id))
+            status = self.task_status(task_id)
+            last_status = status.get("status", last_status)
+            if last_status == "succeeded":
+                return status
+            if last_status in {"failed", "canceled"}:
+                detail = status.get("error_message") or status.get("message") or "Task {}".format(last_status)
+                raise CloudClientError("Cloud task {}: {}".format(last_status, detail))
+            time.sleep(self.poll_interval)
+        raise CloudClientError("Cloud task polling timed out after {} seconds. task_id={}, last_status={}".format(self.poll_timeout, task_id, last_status))
 
     def account_login(self, username, password):
         return self._post_public(

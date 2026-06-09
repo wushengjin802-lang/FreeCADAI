@@ -16,7 +16,7 @@ from server.app.models.entities import AdminSession, AdminUser, ApiKey, Workspac
 
 
 _admin_actor = ContextVar("admin_actor", default="admin")
-_admin_principal = ContextVar("admin_principal", default={"id": None, "username": "admin", "role": "owner", "legacy": True})
+_admin_principal = ContextVar("admin_principal", default={"id": None, "username": "admin", "role": "viewer"})
 
 
 def hash_api_key(api_key):
@@ -110,24 +110,19 @@ def ensure_default_admin(db: Session):
 
 def authenticate_admin(db: Session = Depends(get_db), authorization: str = Header(default="")):
     token = _extract_bearer(authorization)
-    if not settings.admin_token or not hmac.compare_digest(token, settings.admin_token):
-        session = db.execute(
-            select(AdminSession).where(
-                AdminSession.token_hash == hash_api_key(token),
-                AdminSession.status == "active",
-                AdminSession.expires_at > datetime.utcnow(),
-            )
-        ).scalar_one_or_none()
-        if session is None:
-            raise HTTPException(status_code=403, detail="Invalid admin token.")
-        user = db.get(AdminUser, session.user_id)
-        if user is None or user.status != "active":
-            raise HTTPException(status_code=403, detail="Admin user is not active.")
-        principal = {"id": user.id, "username": user.username, "role": user.role, "legacy": False}
-        _admin_actor.set(user.username)
-        _admin_principal.set(principal)
-        return principal
-    principal = {"id": None, "username": "legacy-admin-token", "role": "owner", "legacy": True}
-    _admin_actor.set("legacy-admin-token")
+    session = db.execute(
+        select(AdminSession).where(
+            AdminSession.token_hash == hash_api_key(token),
+            AdminSession.status == "active",
+            AdminSession.expires_at > datetime.utcnow(),
+        )
+    ).scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=403, detail="Invalid admin session.")
+    user = db.get(AdminUser, session.user_id)
+    if user is None or user.status != "active":
+        raise HTTPException(status_code=403, detail="Admin user is not active.")
+    principal = {"id": user.id, "username": user.username, "role": user.role}
+    _admin_actor.set(user.username)
     _admin_principal.set(principal)
     return principal

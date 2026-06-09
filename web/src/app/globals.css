@@ -1,0 +1,345 @@
+:root {
+  --console-ink: #18211d;
+  --console-muted: #68736d;
+  --console-line: #dbe3dc;
+  --console-paper: #f4f3ed;
+  --console-panel: rgba(255, 255, 255, 0.92);
+  --console-rail: #1f2d2a;
+  --console-green: #16734a;
+  --console-steel: #355263;
+  --console-red: #a23b3b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  color: var(--console-ink);
+  background:
+    linear-gradient(90deg, rgba(53, 82, 99, 0.08) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(53, 82, 99, 0.06) 1px, transparent 1px),
+    var(--console-paper);
+  background-size: 32px 32px;
+  font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+
+.console-shell {
+  min-height: 100vh;
+}
+
+.console-sider {
+  background: var(--console-rail) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.console-brand {
+  padding: 22px 18px 18px;
+  color: #f2f7f0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.console-brand strong {
+  display: block;
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.console-brand span {
+  display: block;
+  margin-top: 8px;
+  color: #aebbb3;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.console-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 74px;
+  padding: 18px 24px;
+  background: rgba(244, 243, 237, 0.86);
+  border-bottom: 1px solid var(--console-line);
+  backdrop-filter: blur(10px);
+}
+
+.console-content {
+  padding: 22px 24px 34px;
+}
+
+.console-card {
+  border-color: var(--console-line) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 14px 34px rgba(28, 42, 34, 0.09);
+}
+
+.metric-card .ant-statistic-title {
+  color: var(--console-muted);
+}
+
+.metric-card .ant-statistic-content {
+  color: var(--console-ink);
+}
+
+.full-width {
+  width: 100%;
+}
+
+.pre-block {
+  max-height: 430px;
+  overflow: auto;
+  margin: 0;
+  padding: 14px;
+  color: #eaf2e9;
+  background: #17201b;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 18px;
+}
+
+.login-card {
+  width: min(430px, 100%);
+}
+
+.muted {
+  color: var(--console-muted);
+}
+
+.balanced-table .ant-table table,
+.api-key-table .ant-table table {
+  table-layout: fixed !important;
+}
+
+.workspace-table .ant-table {
+  min-width: 1540px;
+}
+
+.workspace-table col:nth-child(1) {
+  width: 72px !important;
+}
+
+.workspace-table col:nth-child(2) {
+  width: 240px !important;
+}
+
+.workspace-table col:nth-child(3) {
+  width: 110px !important;
+}
+
+.workspace-table col:nth-child(4) {
+  width: 110px !important;
+}
+
+.workspace-table col:nth-child(5),
+.workspace-table col:nth-child(6) {
+  width: 90px !important;
+}
+
+.workspace-table col:nth-child(7) {
+  width: 320px !important;
+}
+
+.workspace-table col:nth-child(8) {
+  width: 260px !important;
+}
+
+.workspace-table col:nth-child(9) {
+  width: 170px !important;
+}
+
+.workspace-table col:nth-child(10) {
+  width: 178px !important;
+}
+
+.template-table .ant-table {
+  min-width: 1260px;
+}
+
+.template-table col:nth-child(1) {
+  width: 72px !important;
+}
+
+.template-table col:nth-child(2) {
+  width: 120px !important;
+}
+
+.template-table col:nth-child(3) {
+  width: 220px !important;
+}
+
+.template-table col:nth-child(4) {
+  width: 140px !important;
+}
+
+.template-table col:nth-child(5) {
+  width: 110px !important;
+}
+
+.template-table col:nth-child(6) {
+  width: 438px !important;
+}
+
+.template-table col:nth-child(7) {
+  width: 160px !important;
+}
+
+.admin-user-table .ant-table {
+  min-width: 1040px;
+}
+
+.admin-user-table col:nth-child(1) {
+  width: 72px !important;
+}
+
+.admin-user-table col:nth-child(2) {
+  width: 220px !important;
+}
+
+.admin-user-table col:nth-child(3) {
+  width: 120px !important;
+}
+
+.admin-user-table col:nth-child(4) {
+  width: 110px !important;
+}
+
+.admin-user-table col:nth-child(5) {
+  width: 170px !important;
+}
+
+.admin-user-table col:nth-child(6) {
+  width: 180px !important;
+}
+
+.admin-user-table col:nth-child(7) {
+  width: 188px !important;
+}
+
+.api-key-table .ant-table {
+  min-width: 1380px;
+}
+
+.api-key-table col:nth-child(1) {
+  width: 72px !important;
+}
+
+.api-key-table col:nth-child(2) {
+  width: 250px !important;
+}
+
+.api-key-table col:nth-child(3) {
+  width: 300px !important;
+}
+
+.api-key-table col:nth-child(4) {
+  width: 150px !important;
+}
+
+.api-key-table col:nth-child(5) {
+  width: 110px !important;
+}
+
+.api-key-table col:nth-child(6) {
+  width: 170px !important;
+}
+
+.api-key-table col:nth-child(7) {
+  width: 180px !important;
+}
+
+.api-key-table col:nth-child(8) {
+  width: 148px !important;
+}
+
+.api-key-table .ant-table-cell {
+  vertical-align: middle;
+}
+
+.balanced-table .ant-table-cell {
+  vertical-align: middle;
+}
+
+.workspace-table td:nth-child(2),
+.workspace-table td:nth-child(7),
+.workspace-table td:nth-child(8),
+.workspace-table td:nth-child(9),
+.template-table td:nth-child(3),
+.template-table td:nth-child(6),
+.admin-user-table td:nth-child(5),
+.admin-user-table td:nth-child(6) {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.workspace-table th:nth-child(4),
+.workspace-table td:nth-child(4),
+.workspace-table th:nth-child(5),
+.workspace-table td:nth-child(5),
+.workspace-table th:nth-child(6),
+.workspace-table td:nth-child(6),
+.template-table th:nth-child(5),
+.template-table td:nth-child(5),
+.admin-user-table th:nth-child(4),
+.admin-user-table td:nth-child(4) {
+  text-align: center;
+}
+
+.workspace-table th:nth-child(10),
+.workspace-table td:nth-child(10),
+.template-table th:nth-child(7),
+.template-table td:nth-child(7),
+.admin-user-table th:nth-child(7),
+.admin-user-table td:nth-child(7) {
+  text-align: right;
+}
+
+.workspace-table td:nth-child(10) .ant-space,
+.template-table td:nth-child(7) .ant-space,
+.admin-user-table td:nth-child(7) .ant-space {
+  justify-content: flex-end;
+}
+
+.api-key-table td:nth-child(2),
+.api-key-table td:nth-child(6),
+.api-key-table td:nth-child(7) {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.api-key-table th:nth-child(5),
+.api-key-table td:nth-child(5) {
+  text-align: center;
+}
+
+.api-key-table th:nth-child(8),
+.api-key-table td:nth-child(8) {
+  text-align: right;
+}
+
+.api-key-table td:nth-child(8) .ant-space {
+  justify-content: flex-end;
+}
+
+@media (max-width: 760px) {
+  .console-header {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 14px;
+  }
+
+  .console-content {
+    padding: 14px;
+  }
+}

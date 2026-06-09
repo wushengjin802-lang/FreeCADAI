@@ -40,7 +40,8 @@ Copy-Item server\.env.example server\.env
 
 ```text
 FREECADAI_LLM_API_KEY=你的模型服务 Key
-FREECADAI_ADMIN_TOKEN=你的管理端 Token
+FREECADAI_ADMIN_USERNAME=你的管理员用户名
+FREECADAI_ADMIN_PASSWORD=你的管理员密码
 ```
 
 5. 启动 API：
@@ -69,10 +70,11 @@ docker compose up --build
 dev-plugin-key
 ```
 
-默认管理端 Token：
+默认管理员登录：
 
 ```text
-dev-admin-token
+用户名：admin
+密码：dev-admin-password
 ```
 
 ## 插件配置
@@ -89,10 +91,10 @@ dev-admin-token
 
 ## 阶段 5 管理 API
 
-管理 API 使用：
+管理 API 使用登录接口返回的会话 Token：
 
 ```http
-Authorization: Bearer <FREECADAI_ADMIN_TOKEN>
+Authorization: Bearer <admin_session_token>
 ```
 
 已实现接口：

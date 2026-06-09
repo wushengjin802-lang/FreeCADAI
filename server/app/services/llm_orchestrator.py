@@ -28,14 +28,18 @@ def _parse_and_validate(raw):
 
 def generate_script(prompt, context, modeling_mode):
     messages = build_generation_messages(prompt, context, modeling_mode)
-    raw = _client().chat(messages, temperature=settings.llm_temperature)
-    return _parse_and_validate(raw)
+    response = _client().chat_with_usage(messages, temperature=settings.llm_temperature)
+    payload = _parse_and_validate(response["content"])
+    payload["_usage"] = response.get("usage") or {}
+    return payload
 
 
 def repair_script(prompt, context, failed_script, error_text, modeling_mode):
     messages = build_repair_messages(prompt, context, failed_script, error_text, modeling_mode)
-    raw = _client().chat(messages, temperature=settings.llm_temperature)
-    return _parse_and_validate(raw)
+    response = _client().chat_with_usage(messages, temperature=settings.llm_temperature)
+    payload = _parse_and_validate(response["content"])
+    payload["_usage"] = response.get("usage") or {}
+    return payload
 
 
 def regenerate_script(prompt, context, parameters_text, modeling_mode):
@@ -45,5 +49,7 @@ def regenerate_script(prompt, context, parameters_text, modeling_mode):
         parameters_text,
         modeling_mode,
     )
-    raw = _client().chat(messages, temperature=settings.llm_temperature)
-    return _parse_and_validate(raw)
+    response = _client().chat_with_usage(messages, temperature=settings.llm_temperature)
+    payload = _parse_and_validate(response["content"])
+    payload["_usage"] = response.get("usage") or {}
+    return payload

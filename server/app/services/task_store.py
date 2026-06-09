@@ -8,7 +8,7 @@ from server.app.core.config import settings
 from server.app.models.entities import ExecutionReport, GeneratedScript, GenerationTask, Workspace
 
 
-def create_task(db: Session, workspace: Workspace, action, prompt, context, modeling_mode, project_id):
+def create_task(db: Session, workspace: Workspace, action, prompt, context, modeling_mode, project_id, status="running"):
     task = GenerationTask(
         workspace_id=workspace.id,
         project_id=project_id or "",
@@ -17,12 +17,18 @@ def create_task(db: Session, workspace: Workspace, action, prompt, context, mode
         prompt=prompt,
         context_snapshot=context or "",
         model=settings.llm_model,
-        status="running",
+        status=status,
     )
     db.add(task)
     db.commit()
     db.refresh(task)
     return task
+
+
+def mark_task_running(db: Session, task: GenerationTask):
+    task.status = "running"
+    task.updated_at = datetime.utcnow()
+    db.commit()
 
 
 def mark_task_success(db: Session, task: GenerationTask, payload, latency_ms):
@@ -47,6 +53,12 @@ def mark_task_failed(db: Session, task: GenerationTask, error, latency_ms):
     task.status = "failed"
     task.error_message = str(error)
     task.latency_ms = latency_ms
+    task.updated_at = datetime.utcnow()
+    db.commit()
+
+
+def mark_task_canceled(db: Session, task: GenerationTask):
+    task.status = "canceled"
     task.updated_at = datetime.utcnow()
     db.commit()
 

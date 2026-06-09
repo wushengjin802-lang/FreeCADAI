@@ -31,9 +31,48 @@ services:
       FREECADAI_LLM_MODEL: gpt-4.1-mini
       FREECADAI_LLM_TEMPERATURE: "0.1"
       FREECADAI_REDIS_URL: redis://:redis_password@redis:6379/0
-      FREECADAI_ADMIN_TOKEN: dev-admin-token
+      FREECADAI_ADMIN_USERNAME: admin
+      FREECADAI_ADMIN_PASSWORD: dev-admin-password
     ports:
       - "8000:8000"
+
+  worker:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    container_name: freecadai-worker
+    depends_on:
+      - mysql
+      - redis
+    environment:
+      FREECADAI_DATABASE_URL: mysql+pymysql://freecadai:freecadai_password@mysql:3306/freecadai?charset=utf8mb4
+      FREECADAI_PLUGIN_API_KEY: dev-plugin-key
+      FREECADAI_LLM_BASE_URL: https://api.openai.com/v1
+      FREECADAI_LLM_API_KEY: ""
+      FREECADAI_LLM_MODEL: gpt-4.1-mini
+      FREECADAI_LLM_TEMPERATURE: "0.1"
+      FREECADAI_REDIS_URL: redis://:redis_password@redis:6379/0
+      FREECADAI_ADMIN_USERNAME: admin
+      FREECADAI_ADMIN_PASSWORD: dev-admin-password
+      FREECADAI_AUTO_MIGRATE: "0"
+    command: ["python", "-m", "server.app.worker"]
+
+  web:
+    build:
+      context: ..
+      dockerfile: web/Dockerfile
+      args:
+        FREECADAI_API_BASE_URL: http://api:8000
+        NEXT_PUBLIC_ASSET_PREFIX: ""
+        NEXT_PUBLIC_API_PREFIX: ""
+        NEXT_PUBLIC_ROUTE_PREFIX: ""
+    container_name: freecadai-web
+    depends_on:
+      - api
+    environment:
+      FREECADAI_API_BASE_URL: http://api:8000
+    ports:
+      - "3000:3000"
 
   redis:
     image: redis:7.4

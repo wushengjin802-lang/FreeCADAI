@@ -62,6 +62,9 @@ class OpenAICompatibleClient:
         self.timeout = timeout
 
     def chat(self, messages, temperature=0.1):
+        return self.chat_with_usage(messages, temperature=temperature)["content"]
+
+    def chat_with_usage(self, messages, temperature=0.1):
         if not self.base_url:
             raise LLMClientError("Base URL is required.")
         if not self.api_key:
@@ -128,6 +131,9 @@ class OpenAICompatibleClient:
             raise LLMClientError(str(exc))
 
         try:
-            return payload["choices"][0]["message"]["content"]
+            return {
+                "content": payload["choices"][0]["message"]["content"],
+                "usage": payload.get("usage") or {},
+            }
         except (KeyError, IndexError, TypeError):
             raise LLMClientError("Unexpected LLM response: {}".format(payload))

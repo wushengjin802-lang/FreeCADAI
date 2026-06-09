@@ -1,11 +1,13 @@
 __pycache__/
 *.py[cod]
+*.log
 .pytest_cache/
 .venv/
 server/.env
 *.sqlite
 *.db
 node_modules/
+.next/
 dist/
 build/
 docs/

@@ -53,6 +53,33 @@ class GenerationResponse(BaseModel):
     notes: List[str]
 
 
+class GenerationSubmitResponse(BaseModel):
+    task_id: int
+    status: str
+    message: str
+
+
+class GenerationTaskStatusResponse(BaseModel):
+    task_id: int
+    status: str
+    action: str
+    error_message: str = ""
+    latency_ms: int = 0
+    script_id: Optional[int] = None
+    summary: str = ""
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    script: str = ""
+    expected_objects: List[str] = Field(default_factory=list)
+    notes: List[str] = Field(default_factory=list)
+
+
+class TaskActionResponse(BaseModel):
+    ok: bool
+    task_id: int
+    status: str
+    message: str
+
+
 class ExecutionReportRequest(BaseModel):
     task_id: int
     script_id: Optional[int] = None

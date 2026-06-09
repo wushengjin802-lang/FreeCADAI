@@ -78,6 +78,10 @@ class UsageSummary(BaseModel):
     succeeded_count: int
     failed_count: int
     report_count: int
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost: float = 0
 
 
 class UsageDailyItem(BaseModel):
@@ -86,6 +90,18 @@ class UsageDailyItem(BaseModel):
     succeeded_count: int
     failed_count: int
     report_count: int
+    total_tokens: int = 0
+    estimated_cost: float = 0
+
+
+class UsageByModelItem(BaseModel):
+    provider: str
+    model: str
+    request_count: int
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    estimated_cost: float
 
 
 class WorkspaceCreate(BaseModel):
@@ -108,6 +124,29 @@ class WorkspaceOut(BaseModel):
     created_at: str
     api_key_count: int = 0
     task_count: int = 0
+    quota: Optional[Dict[str, Any]] = None
+
+
+class BillingPlanOut(BaseModel):
+    name: str
+    monthly_price_cents: int
+    limits: Dict[str, Optional[int]]
+
+
+class BillingSummaryOut(BaseModel):
+    workspaces: List[Dict[str, Any]]
+
+
+class PaymentCheckoutRequest(BaseModel):
+    workspace_id: int
+    plan: str
+
+
+class PaymentCheckoutResponse(BaseModel):
+    ok: bool
+    provider: str
+    checkout_url: Optional[str] = None
+    message: str
 
 
 class AuditLogOut(BaseModel):

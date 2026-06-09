@@ -20,6 +20,7 @@ from server.app.models.entities import (
     GeneratedScript,
     GenerationTask,
     Template,
+    UsageRecord,
     Workspace,
 )
 from server.app.schemas.admin import (
@@ -33,12 +34,17 @@ from server.app.schemas.admin import (
     ApiKeyCreate,
     ApiKeyCreateResponse,
     ApiKeyOut,
+    BillingPlanOut,
+    BillingSummaryOut,
+    PaymentCheckoutRequest,
+    PaymentCheckoutResponse,
     TaskDetail,
     TaskListItem,
     TemplateCreate,
     TemplateImportRequest,
     TemplateOut,
     TemplateUpdate,
+    UsageByModelItem,
     UsageDailyItem,
     UsageSummary,
     WorkspaceCreate,
@@ -54,10 +60,13 @@ from server.app.services.auth import (
     hash_password,
     verify_password,
 )
+from server.app.services.billing import assert_workspace_quota, billing_plans, quota_summary
+from server.app.services.task_queue import load_generation_task_payload, retry_generation_task
 
 
 auth_router = APIRouter(prefix="/api/v1/admin/auth", tags=["admin-auth"])
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"], dependencies=[Depends(authenticate_admin)])
+billing_router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
 
 
 def _admin_user_out(row: AdminUser):
@@ -91,6 +100,21 @@ def _api_key_out(row: ApiKey):
         status=row.status,
         last_used_at=row.last_used_at.isoformat(timespec="seconds") if row.last_used_at else None,
         created_at=row.created_at.isoformat(timespec="seconds"),
+    )
+
+
+def _workspace_out(db: Session, row: Workspace):
+    api_key_count = db.scalar(select(func.count()).select_from(ApiKey).where(ApiKey.workspace_id == row.id)) or 0
+    task_count = db.scalar(select(func.count()).select_from(GenerationTask).where(GenerationTask.workspace_id == row.id)) or 0
+    return WorkspaceOut(
+        id=row.id,
+        name=row.name,
+        plan=row.plan,
+        status=row.status,
+        created_at=row.created_at.isoformat(timespec="seconds"),
+        api_key_count=api_key_count,
+        task_count=task_count,
+        quota=quota_summary(db, row),
     )
 
 
@@ -162,8 +186,6 @@ def me(admin=Depends(authenticate_admin)):
 @router.put("/auth/password")
 def change_own_password(payload: AdminPasswordChange, db: Session = Depends(get_db), authorization: str = Header(default="")):
     principal = _require_role(db, {"owner", "operator", "viewer"}, "admin.password.change", authorization=authorization)
-    if principal.get("legacy"):
-        raise HTTPException(status_code=400, detail="Legacy admin token cannot change a password.")
     user = db.get(AdminUser, principal["id"])
     if user is None or not verify_password(payload.current_password, user.password_hash):
         raise HTTPException(status_code=403, detail="Current password is incorrect.")
@@ -236,22 +258,7 @@ def update_admin_user(user_id: int, payload: AdminUserUpdate, db: Session = Depe
 @router.get("/workspaces", response_model=list[WorkspaceOut])
 def list_workspaces(db: Session = Depends(get_db)):
     rows = db.execute(select(Workspace).order_by(Workspace.id)).scalars().all()
-    result = []
-    for row in rows:
-        api_key_count = db.scalar(select(func.count()).select_from(ApiKey).where(ApiKey.workspace_id == row.id)) or 0
-        task_count = db.scalar(select(func.count()).select_from(GenerationTask).where(GenerationTask.workspace_id == row.id)) or 0
-        result.append(
-            WorkspaceOut(
-                id=row.id,
-                name=row.name,
-                plan=row.plan,
-                status=row.status,
-                created_at=row.created_at.isoformat(timespec="seconds"),
-                api_key_count=api_key_count,
-                task_count=task_count,
-            )
-        )
-    return result
+    return [_workspace_out(db, row) for row in rows]
 
 
 @router.post("/workspaces", response_model=WorkspaceOut)
@@ -263,15 +270,7 @@ def create_workspace(payload: WorkspaceCreate, db: Session = Depends(get_db), au
     _audit(db, "workspace.create", "workspace", item.id, item.id, {"name": item.name, "plan": item.plan, "status": item.status})
     db.commit()
     db.refresh(item)
-    return WorkspaceOut(
-        id=item.id,
-        name=item.name,
-        plan=item.plan,
-        status=item.status,
-        created_at=item.created_at.isoformat(timespec="seconds"),
-        api_key_count=0,
-        task_count=0,
-    )
+    return _workspace_out(db, item)
 
 
 @router.put("/workspaces/{workspace_id}", response_model=WorkspaceOut)
@@ -289,17 +288,7 @@ def update_workspace(workspace_id: int, payload: WorkspaceUpdate, db: Session = 
     _audit(db, "workspace.update", "workspace", item.id, item.id, changed)
     db.commit()
     db.refresh(item)
-    api_key_count = db.scalar(select(func.count()).select_from(ApiKey).where(ApiKey.workspace_id == item.id)) or 0
-    task_count = db.scalar(select(func.count()).select_from(GenerationTask).where(GenerationTask.workspace_id == item.id)) or 0
-    return WorkspaceOut(
-        id=item.id,
-        name=item.name,
-        plan=item.plan,
-        status=item.status,
-        created_at=item.created_at.isoformat(timespec="seconds"),
-        api_key_count=api_key_count,
-        task_count=task_count,
-    )
+    return _workspace_out(db, item)
 
 
 @router.get("/tasks", response_model=list[TaskListItem])
@@ -447,6 +436,44 @@ def task_detail(task_id: int, db: Session = Depends(get_db)):
     )
 
 
+@router.post("/tasks/{task_id}/cancel")
+def cancel_admin_task(task_id: int, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner", "operator"}, "tasks.cancel", "task", authorization)
+    task = db.get(GenerationTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    if task.status not in {"queued", "running"}:
+        return {"ok": False, "task_id": task.id, "status": task.status, "message": "当前任务状态不可取消。"}
+    task.status = "canceled"
+    task.error_message = "管理员已取消任务。"
+    _audit(db, "task.cancel", "task", task.id, task.workspace_id, {"status": task.status})
+    db.commit()
+    return {"ok": True, "task_id": task.id, "status": task.status}
+
+
+@router.post("/tasks/{task_id}/retry")
+def retry_admin_task(task_id: int, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner", "operator"}, "tasks.retry", "task", authorization)
+    task = db.get(GenerationTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    workspace = db.get(Workspace, task.workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    if task.status not in {"failed", "canceled"}:
+        return {"ok": False, "task_id": task.id, "status": task.status, "message": "只有失败或已取消任务可以重试。"}
+    if load_generation_task_payload(task.id) is None:
+        raise HTTPException(status_code=409, detail="任务请求内容已不存在，无法重试。")
+    assert_workspace_quota(db, workspace, "tasks")
+    assert_workspace_quota(db, workspace, "concurrent")
+    task.status = "queued"
+    task.error_message = ""
+    _audit(db, "task.retry", "task", task.id, task.workspace_id, {})
+    db.commit()
+    retry_generation_task(task.id)
+    return {"ok": True, "task_id": task.id, "status": task.status}
+
+
 @router.get("/templates", response_model=list[TemplateOut])
 def list_templates(db: Session = Depends(get_db), include_disabled: bool = False, workspace_id: int | None = None):
     stmt = select(Template).order_by(Template.category, Template.name)
@@ -468,6 +495,19 @@ def import_templates(payload: TemplateImportRequest, db: Session = Depends(get_d
     _require_role(db, {"owner", "operator"}, "templates.import", "template", authorization)
     imported: list[TemplateOut] = []
     for template in payload.templates:
+        if template.workspace_id is not None:
+            workspace = db.get(Workspace, template.workspace_id)
+            if workspace is None:
+                raise HTTPException(status_code=404, detail="Workspace not found.")
+            existing_for_limit = db.execute(
+                select(Template).where(
+                    Template.name == template.name,
+                    Template.category == template.category,
+                    Template.workspace_id == template.workspace_id,
+                )
+            ).scalar_one_or_none()
+            if existing_for_limit is None:
+                assert_workspace_quota(db, workspace, "templates")
         existing = db.execute(
             select(Template).where(
                 Template.name == template.name,
@@ -499,6 +539,11 @@ def import_templates(payload: TemplateImportRequest, db: Session = Depends(get_d
 @router.post("/templates", response_model=TemplateOut)
 def create_template(payload: TemplateCreate, db: Session = Depends(get_db), authorization: str = Header(default="")):
     _require_role(db, {"owner", "operator"}, "templates.create", "template", authorization)
+    if payload.workspace_id is not None:
+        workspace = db.get(Workspace, payload.workspace_id)
+        if workspace is None:
+            raise HTTPException(status_code=404, detail="Workspace not found.")
+        assert_workspace_quota(db, workspace, "templates")
     item = Template(
         workspace_id=payload.workspace_id,
         name=payload.name,
@@ -552,6 +597,8 @@ def create_api_key(payload: ApiKeyCreate, db: Session = Depends(get_db), authori
         workspace = Workspace(id=payload.workspace_id, name="Workspace {}".format(payload.workspace_id))
         db.add(workspace)
         db.commit()
+        db.refresh(workspace)
+    assert_workspace_quota(db, workspace, "api_keys")
     raw_key = "fcai_" + secrets.token_urlsafe(32)
     prefix = raw_key[:12]
     item = ApiKey(
@@ -609,21 +656,33 @@ def usage_summary(db: Session = Depends(get_db), workspace_id: int | None = None
     succeeded_stmt = select(func.count()).select_from(GenerationTask).where(GenerationTask.status == "succeeded")
     failed_stmt = select(func.count()).select_from(GenerationTask).where(GenerationTask.status == "failed")
     report_stmt = select(func.count()).select_from(ExecutionReport)
+    usage_stmt = select(
+        func.coalesce(func.sum(UsageRecord.input_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.output_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.total_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.estimated_cost), 0),
+    )
     if workspace_id is not None:
         task_stmt = task_stmt.where(GenerationTask.workspace_id == workspace_id)
         succeeded_stmt = succeeded_stmt.where(GenerationTask.workspace_id == workspace_id)
         failed_stmt = failed_stmt.where(GenerationTask.workspace_id == workspace_id)
         task_ids = select(GenerationTask.id).where(GenerationTask.workspace_id == workspace_id)
         report_stmt = report_stmt.where(ExecutionReport.task_id.in_(task_ids))
+        usage_stmt = usage_stmt.where(UsageRecord.workspace_id == workspace_id)
     task_count = db.scalar(task_stmt) or 0
     succeeded_count = db.scalar(succeeded_stmt) or 0
     failed_count = db.scalar(failed_stmt) or 0
     report_count = db.scalar(report_stmt) or 0
+    usage = db.execute(usage_stmt).one()
     return UsageSummary(
         task_count=task_count,
         succeeded_count=succeeded_count,
         failed_count=failed_count,
         report_count=report_count,
+        input_tokens=int(usage[0] or 0),
+        output_tokens=int(usage[1] or 0),
+        total_tokens=int(usage[2] or 0),
+        estimated_cost=float(usage[3] or 0),
     )
 
 
@@ -636,6 +695,8 @@ def usage_daily(db: Session = Depends(get_db), days: int = Query(default=14, ge=
             "succeeded_count": 0,
             "failed_count": 0,
             "report_count": 0,
+            "total_tokens": 0,
+            "estimated_cost": 0,
         }
         for index in range(days)
     }
@@ -660,10 +721,122 @@ def usage_daily(db: Session = Depends(get_db), days: int = Query(default=14, ge=
         key = report.created_at.date().isoformat()
         if key in buckets:
             buckets[key]["report_count"] += 1
+    usage_stmt = select(UsageRecord).where(UsageRecord.created_at >= datetime.combine(start_day, datetime.min.time()))
+    if workspace_id is not None:
+        usage_stmt = usage_stmt.where(UsageRecord.workspace_id == workspace_id)
+    usage_rows = db.execute(usage_stmt).scalars().all()
+    for usage in usage_rows:
+        key = usage.created_at.date().isoformat()
+        if key in buckets:
+            buckets[key]["total_tokens"] += int(usage.total_tokens or 0)
+            buckets[key]["estimated_cost"] += float(usage.estimated_cost or 0)
     return [
         UsageDailyItem(day=day, **values)
         for day, values in buckets.items()
     ]
+
+
+@router.get("/usage/by-model", response_model=list[UsageByModelItem])
+def usage_by_model(db: Session = Depends(get_db), workspace_id: int | None = None):
+    stmt = select(
+        UsageRecord.provider,
+        UsageRecord.model,
+        func.count(UsageRecord.id),
+        func.coalesce(func.sum(UsageRecord.input_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.output_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.total_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.estimated_cost), 0),
+    ).group_by(UsageRecord.provider, UsageRecord.model)
+    if workspace_id is not None:
+        stmt = stmt.where(UsageRecord.workspace_id == workspace_id)
+    rows = db.execute(stmt).all()
+    return [
+        UsageByModelItem(
+            provider=row[0],
+            model=row[1],
+            request_count=int(row[2] or 0),
+            input_tokens=int(row[3] or 0),
+            output_tokens=int(row[4] or 0),
+            total_tokens=int(row[5] or 0),
+            estimated_cost=float(row[6] or 0),
+        )
+        for row in rows
+    ]
+
+
+@router.get("/billing/plans", response_model=list[BillingPlanOut])
+def list_billing_plans():
+    return billing_plans()
+
+
+@router.get("/billing/summary", response_model=BillingSummaryOut)
+def billing_summary(db: Session = Depends(get_db), workspace_id: int | None = None):
+    stmt = select(Workspace).order_by(Workspace.id)
+    if workspace_id is not None:
+        stmt = stmt.where(Workspace.id == workspace_id)
+    rows = db.execute(stmt).scalars().all()
+    return BillingSummaryOut(workspaces=[quota_summary(db, row) for row in rows])
+
+
+@router.post("/billing/checkout", response_model=PaymentCheckoutResponse)
+def create_payment_checkout(
+    payload: PaymentCheckoutRequest,
+    db: Session = Depends(get_db),
+    authorization: str = Header(default=""),
+):
+    _require_role(db, {"owner", "operator"}, "billing.checkout", "billing", authorization)
+    workspace = db.get(Workspace, payload.workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    if payload.plan not in {item["name"] for item in billing_plans()}:
+        raise HTTPException(status_code=400, detail="Unknown billing plan.")
+    _audit(
+        db,
+        "billing.checkout.requested",
+        "workspace",
+        workspace.id,
+        workspace.id,
+        {"current_plan": workspace.plan, "target_plan": payload.plan, "provider": "placeholder"},
+    )
+    db.commit()
+    return PaymentCheckoutResponse(
+        ok=True,
+        provider="placeholder",
+        checkout_url=None,
+        message="支付接口已预留；接入支付服务后将在这里返回 checkout_url。",
+    )
+
+
+@router.post("/billing/webhook")
+def billing_webhook(payload: dict, db: Session = Depends(get_db)):
+    db.add(
+        AuditLog(
+            actor="payment_webhook",
+            action="billing.webhook.received",
+            target_type="billing",
+            target_id=str(payload.get("event_id", "")),
+            workspace_id=payload.get("workspace_id"),
+            metadata_json=payload,
+        )
+    )
+    db.commit()
+    return {"ok": True, "message": "Billing webhook placeholder accepted."}
+
+
+@billing_router.post("/webhook")
+def public_billing_webhook(payload: dict, db: Session = Depends(get_db)):
+    db.add(
+        AuditLog(
+            actor="payment_webhook",
+            action="billing.webhook.received",
+            target_type="billing",
+            target_id=str(payload.get("event_id", "")),
+            workspace_id=payload.get("workspace_id"),
+            metadata_json=payload,
+        )
+    )
+    db.commit()
+    return {"ok": True, "message": "Billing webhook placeholder accepted."}
 
 
 @router.get("/audit-logs", response_model=list[AuditLogOut])

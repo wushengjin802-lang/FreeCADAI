@@ -11,11 +11,14 @@ from freecad_ai.templates import TEMPLATES
 
 from server.app.db.session import get_db
 from server.app.models.entities import AdminUser, ApiKey, AuditLog, Template, Workspace
+from server.app.models.entities import GeneratedScript, GenerationTask
 from server.app.schemas.plugin import (
     ExecutionReportRequest,
     ExecutionReportResponse,
     GenerateRequest,
+    GenerationSubmitResponse,
     GenerationResponse,
+    GenerationTaskStatusResponse,
     PluginAccountLoginRequest,
     PluginAccountLoginResponse,
     PluginBindWorkspaceRequest,
@@ -26,11 +29,14 @@ from server.app.schemas.plugin import (
     PluginWorkspacesResponse,
     RegenerateRequest,
     RepairRequest,
+    TaskActionResponse,
     VerifyRequest,
     VerifyResponse,
 )
 from server.app.services.auth import authenticate_admin, authenticate_plugin, create_admin_session, hash_api_key, verify_password
+from server.app.services.billing import assert_workspace_quota, record_usage
 from server.app.services.llm_orchestrator import generate_script, regenerate_script, repair_script
+from server.app.services.task_queue import enqueue_generation_task, load_generation_task_payload, retry_generation_task
 from server.app.services.task_store import create_task, mark_task_failed, mark_task_success, save_execution_report
 
 
@@ -116,6 +122,7 @@ def plugin_account_bind_workspace(
     workspace = db.get(Workspace, payload.workspace_id)
     if workspace is None or workspace.status != "active":
         raise HTTPException(status_code=404, detail="Workspace is not active.")
+    assert_workspace_quota(db, workspace, "api_keys")
     raw_key = "fcai_" + secrets.token_urlsafe(32)
     prefix = raw_key[:12]
     item = ApiKey(
@@ -173,7 +180,59 @@ def plugin_templates(
     )
 
 
+def _status_payload(db: Session, task: GenerationTask):
+    script = db.execute(select(GeneratedScript).where(GeneratedScript.task_id == task.id)).scalars().first()
+    return GenerationTaskStatusResponse(
+        task_id=task.id,
+        status=task.status,
+        action=task.action,
+        error_message=task.error_message,
+        latency_ms=task.latency_ms,
+        script_id=script.id if script else None,
+        summary=script.summary if script else "",
+        parameters=script.parameters_json if script else {},
+        script=script.script if script else "",
+        expected_objects=script.expected_objects_json if script else [],
+        notes=[],
+    )
+
+
+def _require_workspace_task(db: Session, workspace: Workspace, task_id: int):
+    task = db.get(GenerationTask, task_id)
+    if task is None or task.workspace_id != workspace.id:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return task
+
+
+def _submit_generation(db: Session, workspace: Workspace, action: str, request, extra=None):
+    assert_workspace_quota(db, workspace, "tasks")
+    assert_workspace_quota(db, workspace, "concurrent")
+    task = create_task(
+        db,
+        workspace,
+        action,
+        request.prompt,
+        request.context,
+        request.modeling_mode,
+        request.project_id,
+        status="queued",
+    )
+    payload = {
+        "action": action,
+        "prompt": request.prompt,
+        "context": request.context,
+        "modeling_mode": request.modeling_mode,
+        "project_id": request.project_id,
+    }
+    if extra:
+        payload.update(extra)
+    enqueue_generation_task(task.id, payload)
+    return GenerationSubmitResponse(task_id=task.id, status=task.status, message="任务已进入队列。")
+
+
 def _run_generation(db, workspace, action, request, callback):
+    assert_workspace_quota(db, workspace, "tasks")
+    assert_workspace_quota(db, workspace, "concurrent")
     task = create_task(
         db,
         workspace,
@@ -188,6 +247,7 @@ def _run_generation(db, workspace, action, request, callback):
         payload = callback()
         latency_ms = int((time.time() - started) * 1000)
         script = mark_task_success(db, task, payload, latency_ms)
+        record_usage(db, workspace, task, payload.get("_usage"))
         payload["task_id"] = task.id
         payload["script_id"] = script.id
         return GenerationResponse(**payload)
@@ -195,6 +255,84 @@ def _run_generation(db, workspace, action, request, callback):
         latency_ms = int((time.time() - started) * 1000)
         mark_task_failed(db, task, exc, latency_ms)
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/generate/submit", response_model=GenerationSubmitResponse)
+def submit_generate(
+    request: GenerateRequest,
+    db: Session = Depends(get_db),
+    workspace=Depends(authenticate_plugin),
+):
+    return _submit_generation(db, workspace, "generate", request)
+
+
+@router.post("/repair/submit", response_model=GenerationSubmitResponse)
+def submit_repair(
+    request: RepairRequest,
+    db: Session = Depends(get_db),
+    workspace=Depends(authenticate_plugin),
+):
+    return _submit_generation(
+        db,
+        workspace,
+        "repair",
+        request,
+        {"failed_script": request.failed_script, "error_text": request.error_text},
+    )
+
+
+@router.post("/regenerate/submit", response_model=GenerationSubmitResponse)
+def submit_regenerate(
+    request: RegenerateRequest,
+    db: Session = Depends(get_db),
+    workspace=Depends(authenticate_plugin),
+):
+    return _submit_generation(db, workspace, "regenerate", request, {"parameters": request.parameters})
+
+
+@router.get("/tasks/{task_id}", response_model=GenerationTaskStatusResponse)
+def task_status(
+    task_id: int,
+    db: Session = Depends(get_db),
+    workspace=Depends(authenticate_plugin),
+):
+    task = _require_workspace_task(db, workspace, task_id)
+    return _status_payload(db, task)
+
+
+@router.post("/tasks/{task_id}/cancel", response_model=TaskActionResponse)
+def cancel_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    workspace=Depends(authenticate_plugin),
+):
+    task = _require_workspace_task(db, workspace, task_id)
+    if task.status not in {"queued", "running"}:
+        return TaskActionResponse(ok=False, task_id=task.id, status=task.status, message="当前任务状态不可取消。")
+    task.status = "canceled"
+    task.error_message = "用户已取消任务。"
+    db.commit()
+    return TaskActionResponse(ok=True, task_id=task.id, status=task.status, message="任务已取消。")
+
+
+@router.post("/tasks/{task_id}/retry", response_model=TaskActionResponse)
+def retry_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    workspace=Depends(authenticate_plugin),
+):
+    task = _require_workspace_task(db, workspace, task_id)
+    if task.status not in {"failed", "canceled"}:
+        return TaskActionResponse(ok=False, task_id=task.id, status=task.status, message="只有失败或已取消任务可以重试。")
+    if load_generation_task_payload(task.id) is None:
+        raise HTTPException(status_code=409, detail="任务请求内容已不存在，无法重试。")
+    assert_workspace_quota(db, workspace, "tasks")
+    assert_workspace_quota(db, workspace, "concurrent")
+    task.status = "queued"
+    task.error_message = ""
+    db.commit()
+    retry_generation_task(task.id)
+    return TaskActionResponse(ok=True, task_id=task.id, status=task.status, message="任务已重新入队。")
 
 
 @router.post("/generate", response_model=GenerationResponse)
