@@ -100,7 +100,7 @@ class ExecutionReportResponse(BaseModel):
 class PluginTemplate(BaseModel):
     id: str
     name: str
-    category: str = "common"
+    category: str = "通用"
     prompt: str
 
 

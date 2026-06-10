@@ -115,6 +115,61 @@ export type Template = {
   enabled: boolean;
 };
 
+export type ScriptVersion = {
+  id: number;
+  asset_id: number;
+  task_id?: number | null;
+  version: number;
+  script: string;
+  summary: string;
+  parameters: Record<string, unknown>;
+  expected_objects: unknown[];
+  validation_status: string;
+  validation_error: string;
+  created_by: string;
+  created_at: string;
+};
+
+export type ScriptAsset = {
+  id: number;
+  workspace_id: number;
+  task_id?: number | null;
+  current_version_id?: number | null;
+  current_version?: number | null;
+  name: string;
+  description: string;
+  modeling_mode: string;
+  project_id: string;
+  source: string;
+  favorite: boolean;
+  status: string;
+  tags: string[];
+  metadata: Record<string, unknown>;
+  summary: string;
+  script_preview: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ModelAsset = {
+  id: number;
+  workspace_id: number;
+  script_asset_id?: number | null;
+  task_id?: number | null;
+  project_id: string;
+  name: string;
+  file_name: string;
+  file_type: string;
+  storage_uri: string;
+  preview_uri: string;
+  checksum: string;
+  size_bytes: number;
+  status: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ApiKey = {
   id: number;
   workspace_id: number;

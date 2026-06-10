@@ -7,8 +7,6 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from freecad_ai.templates import TEMPLATES
-
 from server.app.db.session import get_db
 from server.app.models.entities import AdminUser, ApiKey, AuditLog, Template, Workspace
 from server.app.models.entities import GeneratedScript, GenerationTask
@@ -35,6 +33,7 @@ from server.app.schemas.plugin import (
 )
 from server.app.services.auth import authenticate_admin, authenticate_plugin, create_admin_session, hash_api_key, verify_password
 from server.app.services.billing import assert_workspace_quota, record_usage
+from server.app.services.default_templates import builtin_template_rows
 from server.app.services.llm_orchestrator import generate_script, regenerate_script, repair_script
 from server.app.services.task_queue import enqueue_generation_task, load_generation_task_payload, retry_generation_task
 from server.app.services.task_store import create_task, mark_task_failed, mark_task_success, save_execution_report
@@ -172,10 +171,10 @@ def plugin_templates(
             PluginTemplate(
                 id="builtin-{}".format(index),
                 name=item["name"],
-                category="builtin",
+                category=item["category"],
                 prompt=item["prompt"],
             )
-            for index, item in enumerate(TEMPLATES, start=1)
+            for index, item in enumerate(builtin_template_rows(), start=1)
         ]
     )
 

@@ -10,7 +10,9 @@ from server.app.core.config import settings
 from server.app.core.redis import redis_ping
 from server.app.db.migrations import migrate_database
 from server.app.db.session import SessionLocal
+from server.app.services.assets import backfill_script_assets
 from server.app.services.auth import ensure_default_admin
+from server.app.services.default_templates import ensure_default_templates
 
 # Import models so create_all can discover them in the phase 4 prototype.
 from server.app.models import entities  # noqa: F401
@@ -44,6 +46,9 @@ def startup():
     db = SessionLocal()
     try:
         ensure_default_admin(db)
+        ensure_default_templates(db)
+        backfill_script_assets(db)
+        db.commit()
     finally:
         db.close()
 

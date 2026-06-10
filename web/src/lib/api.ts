@@ -8,6 +8,9 @@ import type {
   BillingSummary,
   Health,
   LoginResponse,
+  ModelAsset,
+  ScriptAsset,
+  ScriptVersion,
   TaskDetail,
   TaskListItem,
   Template,
@@ -104,6 +107,28 @@ export const adminApi = {
   taskDetail: (token: string, id: number) => apiFetch<TaskDetail>(`/api/v1/admin/tasks/${id}`, token),
   cancelTask: (token: string, id: number) => apiFetch<{ ok: boolean; task_id: number; status: string; message?: string }>(`/api/v1/admin/tasks/${id}/cancel`, token, { method: "POST" }),
   retryTask: (token: string, id: number) => apiFetch<{ ok: boolean; task_id: number; status: string; message?: string }>(`/api/v1/admin/tasks/${id}/retry`, token, { method: "POST" }),
+  scriptAssets: (token: string, workspaceId?: number | null) =>
+    apiFetch<ScriptAsset[]>(`/api/v1/admin/script-assets${toQuery({ workspace_id: workspaceId })}`, token),
+  scriptVersions: (token: string, assetId: number) =>
+    apiFetch<ScriptVersion[]>(`/api/v1/admin/script-assets/${assetId}/versions`, token),
+  updateScriptAsset: (token: string, id: number, body: Partial<Pick<ScriptAsset, "name" | "description" | "favorite" | "status" | "tags" | "metadata">>) =>
+    apiFetch<ScriptAsset>(`/api/v1/admin/script-assets/${id}`, token, { method: "PUT", body: JSON.stringify(body) }),
+  favoriteScriptAsset: (token: string, id: number) =>
+    apiFetch<ScriptAsset>(`/api/v1/admin/script-assets/${id}/favorite`, token, { method: "POST" }),
+  copyScriptAsset: (token: string, id: number) =>
+    apiFetch<ScriptAsset>(`/api/v1/admin/script-assets/${id}/copy`, token, { method: "POST" }),
+  rollbackScriptAsset: (token: string, id: number, versionId: number) =>
+    apiFetch<ScriptAsset>(`/api/v1/admin/script-assets/${id}/rollback`, token, { method: "POST", body: JSON.stringify({ version_id: versionId }) }),
+  reuseScriptAssetTemplate: (token: string, id: number, body: { name?: string; category: string; workspace_id?: number | null }) =>
+    apiFetch<Template>(`/api/v1/admin/script-assets/${id}/reuse-template`, token, { method: "POST", body: JSON.stringify(body) }),
+  modelAssets: (token: string, workspaceId?: number | null) =>
+    apiFetch<ModelAsset[]>(`/api/v1/admin/model-assets${toQuery({ workspace_id: workspaceId })}`, token),
+  createModelAsset: (token: string, body: Omit<ModelAsset, "id" | "created_at" | "updated_at">) =>
+    apiFetch<ModelAsset>("/api/v1/admin/model-assets", token, { method: "POST", body: JSON.stringify(body) }),
+  updateModelAsset: (token: string, id: number, body: Partial<Omit<ModelAsset, "id" | "workspace_id" | "created_at" | "updated_at">>) =>
+    apiFetch<ModelAsset>(`/api/v1/admin/model-assets/${id}`, token, { method: "PUT", body: JSON.stringify(body) }),
+  deleteModelAsset: (token: string, id: number) =>
+    apiFetch<{ ok: boolean }>(`/api/v1/admin/model-assets/${id}`, token, { method: "DELETE" }),
   templates: (token: string, workspaceId?: number | null) =>
     apiFetch<Template[]>(`/api/v1/admin/templates${toQuery({ include_disabled: true, workspace_id: workspaceId })}`, token),
   createTemplate: (token: string, body: Omit<Template, "id">) =>
@@ -114,6 +139,8 @@ export const adminApi = {
     apiFetch<{ ok: boolean }>(`/api/v1/admin/templates/${id}`, token, { method: "DELETE" }),
   importTemplates: (token: string, templates: Array<Omit<Template, "id">>) =>
     apiFetch<Template[]>("/api/v1/admin/templates/import", token, { method: "POST", body: JSON.stringify({ templates }) }),
+  seedDefaultTemplates: (token: string) =>
+    apiFetch<Template[]>("/api/v1/admin/templates/seed-defaults", token, { method: "POST" }),
   exportTemplates: (token: string, workspaceId?: number | null) =>
     apiFetch<Template[]>(`/api/v1/admin/templates/export${toQuery({ workspace_id: workspaceId })}`, token),
   apiKeys: (token: string, workspaceId?: number | null) =>

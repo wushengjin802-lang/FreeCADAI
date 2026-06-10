@@ -47,7 +47,7 @@ class Template(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     workspace_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
-    category: Mapped[str] = mapped_column(String(64), nullable=False, default="common")
+    category: Mapped[str] = mapped_column(String(64), nullable=False, default="通用")
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
@@ -78,6 +78,8 @@ class GeneratedScript(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     task_id: Mapped[int] = mapped_column(ForeignKey("generation_tasks.id"), nullable=False, index=True)
+    asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    version_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     script: Mapped[str] = mapped_column(Text, nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
     parameters_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
@@ -85,6 +87,64 @@ class GeneratedScript(Base):
     validation_status: Mapped[str] = mapped_column(String(32), nullable=False, default="passed")
     validation_error: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class ScriptAsset(Base):
+    __tablename__ = "script_assets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    task_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    current_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    modeling_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="3d_solid")
+    project_id: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="generation")
+    favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    tags_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class ScriptVersion(Base):
+    __tablename__ = "script_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("script_assets.id"), nullable=False, index=True)
+    task_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    script: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    parameters_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    expected_objects_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    validation_status: Mapped[str] = mapped_column(String(32), nullable=False, default="passed")
+    validation_error: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False, default="system")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class ModelAsset(Base):
+    __tablename__ = "model_assets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    script_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    task_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    project_id: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    file_type: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    storage_uri: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    preview_uri: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    checksum: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 class ExecutionReport(Base):

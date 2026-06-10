@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from server.app.core.config import settings
 from server.app.models.entities import ExecutionReport, GeneratedScript, GenerationTask, Workspace
+from server.app.services.assets import create_script_asset_from_task
 
 
 def create_task(db: Session, workspace: Workspace, action, prompt, context, modeling_mode, project_id, status="running"):
@@ -36,8 +37,11 @@ def mark_task_success(db: Session, task: GenerationTask, payload, latency_ms):
     task.status = "succeeded"
     task.latency_ms = latency_ms
     task.updated_at = datetime.utcnow()
+    asset, version = create_script_asset_from_task(db, task, payload)
     script = GeneratedScript(
         task_id=task.id,
+        asset_id=asset.id,
+        version_id=version.id,
         script=payload.get("script", ""),
         summary=payload.get("summary", ""),
         parameters_json=payload.get("parameters", {}),

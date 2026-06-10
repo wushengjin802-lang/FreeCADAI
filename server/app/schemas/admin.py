@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 class TemplateCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
-    category: str = "common"
+    category: str = "通用"
     prompt: str = Field(..., min_length=1)
     enabled: bool = True
     workspace_id: Optional[int] = None
@@ -71,6 +71,111 @@ class TaskDetail(BaseModel):
     task: Dict[str, Any]
     scripts: List[Dict[str, Any]]
     reports: List[Dict[str, Any]]
+
+
+class ScriptVersionOut(BaseModel):
+    id: int
+    asset_id: int
+    task_id: Optional[int] = None
+    version: int
+    script: str
+    summary: str
+    parameters: Dict[str, Any]
+    expected_objects: List[Any]
+    validation_status: str
+    validation_error: str
+    created_by: str
+    created_at: str
+
+
+class ScriptAssetOut(BaseModel):
+    id: int
+    workspace_id: int
+    task_id: Optional[int] = None
+    current_version_id: Optional[int] = None
+    current_version: Optional[int] = None
+    name: str
+    description: str
+    modeling_mode: str
+    project_id: str
+    source: str
+    favorite: bool
+    status: str
+    tags: List[str]
+    metadata: Dict[str, Any]
+    summary: str = ""
+    script_preview: str = ""
+    created_at: str
+    updated_at: str
+
+
+class ScriptAssetUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    description: Optional[str] = None
+    favorite: Optional[bool] = None
+    status: Optional[str] = None
+    tags: Optional[List[str]] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ScriptRollbackRequest(BaseModel):
+    version_id: int
+
+
+class ScriptReuseTemplateRequest(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=128)
+    category: str = "复用脚本"
+    workspace_id: Optional[int] = None
+
+
+class ModelAssetCreate(BaseModel):
+    workspace_id: int
+    script_asset_id: Optional[int] = None
+    task_id: Optional[int] = None
+    project_id: str = ""
+    name: str = Field(..., min_length=1, max_length=128)
+    file_name: str = ""
+    file_type: str = ""
+    storage_uri: str = ""
+    preview_uri: str = ""
+    checksum: str = ""
+    size_bytes: int = 0
+    status: str = "active"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ModelAssetUpdate(BaseModel):
+    script_asset_id: Optional[int] = None
+    task_id: Optional[int] = None
+    project_id: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    file_name: Optional[str] = None
+    file_type: Optional[str] = None
+    storage_uri: Optional[str] = None
+    preview_uri: Optional[str] = None
+    checksum: Optional[str] = None
+    size_bytes: Optional[int] = None
+    status: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ModelAssetOut(BaseModel):
+    id: int
+    workspace_id: int
+    script_asset_id: Optional[int] = None
+    task_id: Optional[int] = None
+    project_id: str
+    name: str
+    file_name: str
+    file_type: str
+    storage_uri: str
+    preview_uri: str
+    checksum: str
+    size_bytes: int
+    status: str
+    metadata: Dict[str, Any]
+    created_at: str
+    updated_at: str
 
 
 class UsageSummary(BaseModel):

@@ -19,6 +19,9 @@ from server.app.models.entities import (
     ExecutionReport,
     GeneratedScript,
     GenerationTask,
+    ModelAsset,
+    ScriptAsset,
+    ScriptVersion,
     Template,
     UsageRecord,
     Workspace,
@@ -36,8 +39,16 @@ from server.app.schemas.admin import (
     ApiKeyOut,
     BillingPlanOut,
     BillingSummaryOut,
+    ModelAssetCreate,
+    ModelAssetOut,
+    ModelAssetUpdate,
     PaymentCheckoutRequest,
     PaymentCheckoutResponse,
+    ScriptAssetOut,
+    ScriptAssetUpdate,
+    ScriptReuseTemplateRequest,
+    ScriptRollbackRequest,
+    ScriptVersionOut,
     TaskDetail,
     TaskListItem,
     TemplateCreate,
@@ -60,7 +71,9 @@ from server.app.services.auth import (
     hash_password,
     verify_password,
 )
+from server.app.services.assets import copy_script_asset, current_script_version, touch_asset
 from server.app.services.billing import assert_workspace_quota, billing_plans, quota_summary
+from server.app.services.default_templates import ensure_default_templates
 from server.app.services.task_queue import load_generation_task_payload, retry_generation_task
 
 
@@ -88,6 +101,68 @@ def _template_out(row: Template):
         category=row.category,
         prompt=row.prompt,
         enabled=row.enabled,
+    )
+
+
+def _script_version_out(row: ScriptVersion):
+    return ScriptVersionOut(
+        id=row.id,
+        asset_id=row.asset_id,
+        task_id=row.task_id,
+        version=row.version,
+        script=row.script,
+        summary=row.summary,
+        parameters=row.parameters_json,
+        expected_objects=row.expected_objects_json,
+        validation_status=row.validation_status,
+        validation_error=row.validation_error,
+        created_by=row.created_by,
+        created_at=row.created_at.isoformat(timespec="seconds"),
+    )
+
+
+def _script_asset_out(db: Session, row: ScriptAsset):
+    version = current_script_version(db, row)
+    return ScriptAssetOut(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        task_id=row.task_id,
+        current_version_id=row.current_version_id,
+        current_version=version.version if version else None,
+        name=row.name,
+        description=row.description,
+        modeling_mode=row.modeling_mode,
+        project_id=row.project_id,
+        source=row.source,
+        favorite=row.favorite,
+        status=row.status,
+        tags=row.tags_json,
+        metadata=row.metadata_json,
+        summary=version.summary if version else "",
+        script_preview=(version.script[:240] if version else ""),
+        created_at=row.created_at.isoformat(timespec="seconds"),
+        updated_at=row.updated_at.isoformat(timespec="seconds"),
+    )
+
+
+def _model_asset_out(row: ModelAsset):
+    return ModelAssetOut(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        script_asset_id=row.script_asset_id,
+        task_id=row.task_id,
+        project_id=row.project_id,
+        name=row.name,
+        file_name=row.file_name,
+        file_type=row.file_type,
+        storage_uri=row.storage_uri,
+        preview_uri=row.preview_uri,
+        checksum=row.checksum,
+        size_bytes=row.size_bytes,
+        status=row.status,
+        metadata=row.metadata_json,
+        created_at=row.created_at.isoformat(timespec="seconds"),
+        updated_at=row.updated_at.isoformat(timespec="seconds"),
     )
 
 
@@ -410,6 +485,8 @@ def task_detail(task_id: int, db: Session = Depends(get_db)):
         scripts=[
             {
                 "id": item.id,
+                "asset_id": item.asset_id,
+                "version_id": item.version_id,
                 "summary": item.summary,
                 "parameters": item.parameters_json,
                 "expected_objects": item.expected_objects_json,
@@ -474,6 +551,228 @@ def retry_admin_task(task_id: int, db: Session = Depends(get_db), authorization:
     return {"ok": True, "task_id": task.id, "status": task.status}
 
 
+@router.get("/script-assets", response_model=list[ScriptAssetOut])
+def list_script_assets(
+    db: Session = Depends(get_db),
+    workspace_id: int | None = None,
+    q: str = "",
+    favorite: bool | None = None,
+    status: str = "",
+):
+    stmt = select(ScriptAsset)
+    if workspace_id is not None:
+        stmt = stmt.where(ScriptAsset.workspace_id == workspace_id)
+    if favorite is not None:
+        stmt = stmt.where(ScriptAsset.favorite.is_(favorite))
+    if status:
+        stmt = stmt.where(ScriptAsset.status == status)
+    if q:
+        like = "%{}%".format(q.strip())
+        stmt = stmt.where(
+            or_(
+                ScriptAsset.name.ilike(like),
+                ScriptAsset.description.ilike(like),
+                ScriptAsset.project_id.ilike(like),
+            )
+        )
+    rows = db.execute(stmt.order_by(desc(ScriptAsset.updated_at), desc(ScriptAsset.id)).limit(200)).scalars().all()
+    return [_script_asset_out(db, row) for row in rows]
+
+
+@router.get("/script-assets/{asset_id}/versions", response_model=list[ScriptVersionOut])
+def list_script_versions(asset_id: int, db: Session = Depends(get_db)):
+    asset = db.get(ScriptAsset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Script asset not found.")
+    rows = db.execute(
+        select(ScriptVersion).where(ScriptVersion.asset_id == asset_id).order_by(desc(ScriptVersion.version))
+    ).scalars().all()
+    return [_script_version_out(row) for row in rows]
+
+
+@router.put("/script-assets/{asset_id}", response_model=ScriptAssetOut)
+def update_script_asset(asset_id: int, payload: ScriptAssetUpdate, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner", "operator"}, "script_assets.update", "script_asset", authorization)
+    asset = db.get(ScriptAsset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Script asset not found.")
+    for field in ("name", "description", "favorite", "status"):
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(asset, field, value)
+    if payload.tags is not None:
+        asset.tags_json = payload.tags
+    if payload.metadata is not None:
+        asset.metadata_json = payload.metadata
+    touch_asset(asset)
+    _audit(db, "script_asset.update", "script_asset", asset.id, asset.workspace_id, payload.model_dump(exclude_none=True))
+    db.commit()
+    db.refresh(asset)
+    return _script_asset_out(db, asset)
+
+
+@router.post("/script-assets/{asset_id}/favorite", response_model=ScriptAssetOut)
+def favorite_script_asset(asset_id: int, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner", "operator"}, "script_assets.favorite", "script_asset", authorization)
+    asset = db.get(ScriptAsset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Script asset not found.")
+    asset.favorite = not asset.favorite
+    touch_asset(asset)
+    _audit(db, "script_asset.favorite", "script_asset", asset.id, asset.workspace_id, {"favorite": asset.favorite})
+    db.commit()
+    db.refresh(asset)
+    return _script_asset_out(db, asset)
+
+
+@router.post("/script-assets/{asset_id}/copy", response_model=ScriptAssetOut)
+def copy_admin_script_asset(asset_id: int, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    principal = _require_role(db, {"owner", "operator"}, "script_assets.copy", "script_asset", authorization)
+    asset = db.get(ScriptAsset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Script asset not found.")
+    copied = copy_script_asset(db, asset, principal.get("username", "admin"))
+    _audit(db, "script_asset.copy", "script_asset", copied.id, copied.workspace_id, {"source_asset_id": asset.id})
+    db.commit()
+    db.refresh(copied)
+    return _script_asset_out(db, copied)
+
+
+@router.post("/script-assets/{asset_id}/rollback", response_model=ScriptAssetOut)
+def rollback_script_asset(
+    asset_id: int,
+    payload: ScriptRollbackRequest,
+    db: Session = Depends(get_db),
+    authorization: str = Header(default=""),
+):
+    _require_role(db, {"owner", "operator"}, "script_assets.rollback", "script_asset", authorization)
+    asset = db.get(ScriptAsset, asset_id)
+    version = db.get(ScriptVersion, payload.version_id)
+    if asset is None or version is None or version.asset_id != asset_id:
+        raise HTTPException(status_code=404, detail="Script asset version not found.")
+    asset.current_version_id = version.id
+    touch_asset(asset)
+    _audit(db, "script_asset.rollback", "script_asset", asset.id, asset.workspace_id, {"version_id": version.id, "version": version.version})
+    db.commit()
+    db.refresh(asset)
+    return _script_asset_out(db, asset)
+
+
+@router.post("/script-assets/{asset_id}/reuse-template", response_model=TemplateOut)
+def reuse_script_asset_as_template(
+    asset_id: int,
+    payload: ScriptReuseTemplateRequest,
+    db: Session = Depends(get_db),
+    authorization: str = Header(default=""),
+):
+    _require_role(db, {"owner", "operator"}, "script_assets.reuse_template", "script_asset", authorization)
+    asset = db.get(ScriptAsset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Script asset not found.")
+    version = current_script_version(db, asset)
+    if version is None:
+        raise HTTPException(status_code=409, detail="Script asset has no version.")
+    workspace_id = payload.workspace_id if payload.workspace_id is not None else asset.workspace_id
+    workspace = db.get(Workspace, workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    assert_workspace_quota(db, workspace, "templates")
+    item = Template(
+        workspace_id=workspace_id,
+        name=(payload.name or asset.name)[:128],
+        category=payload.category,
+        prompt=version.script,
+        enabled=True,
+    )
+    db.add(item)
+    db.flush()
+    _audit(db, "script_asset.reuse_template", "template", item.id, workspace_id, {"asset_id": asset.id, "version_id": version.id})
+    db.commit()
+    db.refresh(item)
+    return _template_out(item)
+
+
+@router.get("/model-assets", response_model=list[ModelAssetOut])
+def list_model_assets(db: Session = Depends(get_db), workspace_id: int | None = None, q: str = "", status: str = ""):
+    stmt = select(ModelAsset)
+    if workspace_id is not None:
+        stmt = stmt.where(ModelAsset.workspace_id == workspace_id)
+    if status:
+        stmt = stmt.where(ModelAsset.status == status)
+    if q:
+        like = "%{}%".format(q.strip())
+        stmt = stmt.where(
+            or_(
+                ModelAsset.name.ilike(like),
+                ModelAsset.file_name.ilike(like),
+                ModelAsset.project_id.ilike(like),
+            )
+        )
+    rows = db.execute(stmt.order_by(desc(ModelAsset.updated_at), desc(ModelAsset.id)).limit(200)).scalars().all()
+    return [_model_asset_out(row) for row in rows]
+
+
+@router.post("/model-assets", response_model=ModelAssetOut)
+def create_model_asset(payload: ModelAssetCreate, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner", "operator"}, "model_assets.create", "model_asset", authorization)
+    workspace = db.get(Workspace, payload.workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    item = ModelAsset(
+        workspace_id=payload.workspace_id,
+        script_asset_id=payload.script_asset_id,
+        task_id=payload.task_id,
+        project_id=payload.project_id,
+        name=payload.name,
+        file_name=payload.file_name,
+        file_type=payload.file_type,
+        storage_uri=payload.storage_uri,
+        preview_uri=payload.preview_uri,
+        checksum=payload.checksum,
+        size_bytes=payload.size_bytes,
+        status=payload.status,
+        metadata_json=payload.metadata,
+    )
+    db.add(item)
+    db.flush()
+    _audit(db, "model_asset.create", "model_asset", item.id, item.workspace_id, {"name": item.name})
+    db.commit()
+    db.refresh(item)
+    return _model_asset_out(item)
+
+
+@router.put("/model-assets/{asset_id}", response_model=ModelAssetOut)
+def update_model_asset(asset_id: int, payload: ModelAssetUpdate, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner", "operator"}, "model_assets.update", "model_asset", authorization)
+    item = db.get(ModelAsset, asset_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Model asset not found.")
+    for field in ("script_asset_id", "task_id", "project_id", "name", "file_name", "file_type", "storage_uri", "preview_uri", "checksum", "size_bytes", "status"):
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(item, field, value)
+    if payload.metadata is not None:
+        item.metadata_json = payload.metadata
+    touch_asset(item)
+    _audit(db, "model_asset.update", "model_asset", item.id, item.workspace_id, payload.model_dump(exclude_none=True))
+    db.commit()
+    db.refresh(item)
+    return _model_asset_out(item)
+
+
+@router.delete("/model-assets/{asset_id}")
+def delete_model_asset(asset_id: int, db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner", "operator"}, "model_assets.delete", "model_asset", authorization)
+    item = db.get(ModelAsset, asset_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Model asset not found.")
+    workspace_id = item.workspace_id
+    db.delete(item)
+    _audit(db, "model_asset.delete", "model_asset", asset_id, workspace_id, {})
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/templates", response_model=list[TemplateOut])
 def list_templates(db: Session = Depends(get_db), include_disabled: bool = False, workspace_id: int | None = None):
     stmt = select(Template).order_by(Template.category, Template.name)
@@ -534,6 +833,16 @@ def import_templates(payload: TemplateImportRequest, db: Session = Depends(get_d
     for row in rows:
         imported.append(_template_out(row))
     return imported
+
+
+@router.post("/templates/seed-defaults", response_model=list[TemplateOut])
+def seed_default_templates(db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _require_role(db, {"owner", "operator"}, "templates.seed_defaults", "template", authorization)
+    ensure_default_templates(db)
+    _audit(db, "template.seed_defaults", "template", "builtin", None, {"source": "freecad_plugin"})
+    db.commit()
+    rows = db.execute(select(Template).order_by(Template.category, Template.name)).scalars().all()
+    return [_template_out(row) for row in rows]
 
 
 @router.post("/templates", response_model=TemplateOut)

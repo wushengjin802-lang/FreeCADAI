@@ -5,6 +5,7 @@ import {
   AuditOutlined,
   BarChartOutlined,
   DatabaseOutlined,
+  FileTextOutlined,
   KeyOutlined,
   LogoutOutlined,
   ReloadOutlined,
@@ -31,6 +32,7 @@ import {
   Statistic,
   Switch,
   Table,
+  Tabs,
   Tag,
   Typography
 } from "antd";
@@ -42,14 +44,25 @@ import { Providers } from "@/components/Providers";
 import { adminApi, downloadJson, exportTasksCsv } from "@/lib/api";
 import { routePath } from "@/lib/routes";
 import { canManageAdmins, canOperate, useAppStore } from "@/lib/store";
-import type { AdminUser, ApiKey, AuditLog, BillingSummary, TaskDetail, TaskListItem, Template, UsageByModelItem, Workspace } from "@/lib/types";
+import type { AdminUser, ApiKey, AuditLog, BillingSummary, ModelAsset, ScriptAsset, ScriptVersion, TaskDetail, TaskListItem, Template, UsageByModelItem, Workspace } from "@/lib/types";
 
 const { Content, Sider } = Layout;
 const { Text, Title } = Typography;
 
-type ViewKey = "dashboard" | "workspaces" | "tasks" | "templates" | "keys" | "adminUsers" | "audit";
+type ViewKey = "dashboard" | "workspaces" | "tasks" | "assets" | "templates" | "keys" | "adminUsers" | "audit";
 
 const taskLimit = 50;
+
+const templateCategoryOptions = [
+  { value: "通用", label: "通用" },
+  { value: "零件建模", label: "零件建模" },
+  { value: "草图绘制", label: "草图绘制" },
+  { value: "装配设计", label: "装配设计" },
+  { value: "钣金结构", label: "钣金结构" },
+  { value: "工程图", label: "工程图" },
+  { value: "夹具工装", label: "夹具工装" },
+  { value: "参数化", label: "参数化" }
+];
 
 function statusColor(status: string) {
   if (["succeeded", "active"].includes(status)) return "green";
@@ -143,6 +156,7 @@ function ConsolePageContent() {
     { key: "dashboard", icon: <BarChartOutlined />, label: "总览" },
     { key: "workspaces", icon: <DatabaseOutlined />, label: "工作区" },
     { key: "tasks", icon: <ApiOutlined />, label: "任务历史" },
+    { key: "assets", icon: <FileTextOutlined />, label: "资产库" },
     { key: "templates", icon: <DatabaseOutlined />, label: "模板库" },
     { key: "keys", icon: <KeyOutlined />, label: "API Key" },
     { key: "adminUsers", icon: <TeamOutlined />, label: "管理员" },
@@ -200,6 +214,7 @@ function ConsolePageContent() {
           {view === "dashboard" && <Dashboard usage={data.usage.data} daily={data.usageDaily.data || []} usageByModel={data.usageByModel.data || []} billing={data.billing.data} health={data.health.data} />}
           {view === "workspaces" && <WorkspacesView workspaces={data.workspaces.data || []} role={principal?.role} />}
           {view === "tasks" && <TasksView role={principal?.role} />}
+          {view === "assets" && <AssetsView role={principal?.role} />}
           {view === "templates" && <TemplatesView role={principal?.role} />}
           {view === "keys" && <KeysView role={principal?.role} workspaces={data.workspaces.data || []} />}
           {view === "adminUsers" && <AdminUsersView role={principal?.role} />}
@@ -479,6 +494,219 @@ function TasksView({ role }: { role?: string }) {
   );
 }
 
+function AssetsView({ role }: { role?: string }) {
+  const token = useAppStore((state) => state.token);
+  const workspaceId = useAppStore((state) => state.workspaceId);
+  const queryClient = useQueryClient();
+  const { message, modal } = AntApp.useApp();
+  const [modelForm] = Form.useForm();
+  const [selectedScript, setSelectedScript] = useState<ScriptAsset | null>(null);
+  const canWrite = canOperate(role);
+  const scripts = useQuery({ queryKey: ["scriptAssets", token, workspaceId], queryFn: () => adminApi.scriptAssets(token, workspaceId), enabled: Boolean(token) });
+  const models = useQuery({ queryKey: ["modelAssets", token, workspaceId], queryFn: () => adminApi.modelAssets(token, workspaceId), enabled: Boolean(token) });
+  const versions = useQuery({
+    queryKey: ["scriptVersions", token, selectedScript?.id],
+    queryFn: () => adminApi.scriptVersions(token, selectedScript?.id as number),
+    enabled: Boolean(token && selectedScript)
+  });
+  const invalidateAssets = () => {
+    queryClient.invalidateQueries({ queryKey: ["scriptAssets"] });
+    queryClient.invalidateQueries({ queryKey: ["modelAssets"] });
+  };
+  const favoriteMutation = useMutation({ mutationFn: (id: number) => adminApi.favoriteScriptAsset(token, id), onSuccess: invalidateAssets });
+  const copyMutation = useMutation({
+    mutationFn: (id: number) => adminApi.copyScriptAsset(token, id),
+    onSuccess: () => {
+      message.success("脚本资产已复制");
+      invalidateAssets();
+    }
+  });
+  const rollbackMutation = useMutation({
+    mutationFn: ({ assetId, versionId }: { assetId: number; versionId: number }) => adminApi.rollbackScriptAsset(token, assetId, versionId),
+    onSuccess: (asset) => {
+      message.success("已回滚到所选版本");
+      setSelectedScript(asset);
+      invalidateAssets();
+      queryClient.invalidateQueries({ queryKey: ["scriptVersions"] });
+    }
+  });
+  const reuseMutation = useMutation({
+    mutationFn: (asset: ScriptAsset) => adminApi.reuseScriptAssetTemplate(token, asset.id, { name: asset.name, category: "复用脚本", workspace_id: workspaceId ?? asset.workspace_id }),
+    onSuccess: () => {
+      message.success("已复用为模板");
+      queryClient.invalidateQueries({ queryKey: ["templates"] });
+    },
+    onError: (error: Error) => message.error(error.message)
+  });
+  const createModelMutation = useMutation({
+    mutationFn: (values: Omit<ModelAsset, "id" | "created_at" | "updated_at">) => adminApi.createModelAsset(token, values),
+    onSuccess: () => {
+      message.success("模型元数据已保存");
+      modelForm.resetFields();
+      invalidateAssets();
+    },
+    onError: (error: Error) => message.error(error.message)
+  });
+  const deleteModelMutation = useMutation({
+    mutationFn: (id: number) => adminApi.deleteModelAsset(token, id),
+    onSuccess: () => {
+      message.success("模型元数据已删除");
+      invalidateAssets();
+    }
+  });
+
+  const currentVersion = versions.data?.find((item) => item.id === selectedScript?.current_version_id) || versions.data?.[0];
+  const copyScriptText = (version?: ScriptVersion) => {
+    if (!version) return;
+    navigator.clipboard.writeText(version.script).then(() => message.success("脚本已复制")).catch(() => message.error("复制失败"));
+  };
+
+  const scriptColumns: ColumnsType<ScriptAsset> = [
+    { title: "ID", dataIndex: "id", width: 80 },
+    { title: "工作区", dataIndex: "workspace_id", width: 90 },
+    { title: "名称", dataIndex: "name", width: 220, ellipsis: true },
+    { title: "版本", dataIndex: "current_version", width: 90, render: (value) => value ? `v${value}` : "-" },
+    { title: "模式", dataIndex: "modeling_mode", width: 120 },
+    { title: "项目", dataIndex: "project_id", width: 140, render: (value) => value || "-" },
+    { title: "收藏", dataIndex: "favorite", width: 90, render: (value) => <Tag color={value ? "gold" : "default"}>{value ? "已收藏" : "普通"}</Tag> },
+    { title: "摘要", dataIndex: "summary", ellipsis: true },
+    { title: "更新时间", dataIndex: "updated_at", width: 180, render: (value) => formatShanghaiTime(value) },
+    {
+      title: "操作",
+      width: 260,
+      render: (_, row) => (
+        <Space>
+          <Button onClick={() => setSelectedScript(row)}>版本</Button>
+          <Button disabled={!canWrite} onClick={() => favoriteMutation.mutate(row.id)}>{row.favorite ? "取消收藏" : "收藏"}</Button>
+          <Button disabled={!canWrite} onClick={() => copyMutation.mutate(row.id)}>复制资产</Button>
+          <Button disabled={!canWrite} onClick={() => reuseMutation.mutate(row)}>复用</Button>
+        </Space>
+      )
+    }
+  ];
+
+  const modelColumns: ColumnsType<ModelAsset> = [
+    { title: "ID", dataIndex: "id", width: 80 },
+    { title: "工作区", dataIndex: "workspace_id", width: 90 },
+    { title: "名称", dataIndex: "name", width: 200, ellipsis: true },
+    { title: "文件名", dataIndex: "file_name", width: 220, ellipsis: true },
+    { title: "类型", dataIndex: "file_type", width: 100, render: (value) => value || "-" },
+    { title: "脚本资产", dataIndex: "script_asset_id", width: 110, render: (value) => value || "-" },
+    { title: "状态", dataIndex: "status", width: 100, render: (value) => <Tag color={statusColor(value)}>{value}</Tag> },
+    { title: "预览地址", dataIndex: "preview_uri", ellipsis: true, render: (value) => value || "-" },
+    { title: "更新时间", dataIndex: "updated_at", width: 180, render: (value) => formatShanghaiTime(value) },
+    {
+      title: "操作",
+      width: 100,
+      render: (_, row) => <Button danger disabled={!canWrite} onClick={() => modal.confirm({ title: "确认删除模型元数据？", onOk: () => deleteModelMutation.mutate(row.id) })}>删除</Button>
+    }
+  ];
+
+  return (
+    <Space direction="vertical" size={16} className="full-width">
+      <Tabs
+        items={[
+          {
+            key: "scripts",
+            label: "脚本资产",
+            children: (
+              <Card title="脚本资产库" className="console-card">
+                <Table rowKey="id" className="balanced-table" columns={scriptColumns} dataSource={scripts.data || []} loading={scripts.isLoading} scroll={{ x: 1480 }} tableLayout="fixed" pagination={{ pageSize: 10 }} />
+              </Card>
+            )
+          },
+          {
+            key: "models",
+            label: "模型元数据",
+            children: (
+              <Space direction="vertical" size={16} className="full-width">
+                <Card title="新增模型元数据" className="console-card">
+                  <Form
+                    form={modelForm}
+                    layout="vertical"
+                    initialValues={{ workspace_id: workspaceId ?? 1, status: "active", size_bytes: 0 }}
+                    onFinish={(values) => {
+                      createModelMutation.mutate({
+                        workspace_id: Number(values.workspace_id),
+                        script_asset_id: values.script_asset_id ? Number(values.script_asset_id) : null,
+                        task_id: values.task_id ? Number(values.task_id) : null,
+                        project_id: values.project_id || "",
+                        name: values.name,
+                        file_name: values.file_name || "",
+                        file_type: values.file_type || "",
+                        storage_uri: values.storage_uri || "",
+                        preview_uri: values.preview_uri || "",
+                        checksum: values.checksum || "",
+                        size_bytes: Number(values.size_bytes || 0),
+                        status: values.status || "active",
+                        metadata: {}
+                      });
+                    }}
+                  >
+                    <Row gutter={12}>
+                      <Col xs={24} md={6}><Form.Item name="workspace_id" label="工作区 ID" rules={[{ required: true }]}><Input /></Form.Item></Col>
+                      <Col xs={24} md={8}><Form.Item name="name" label="模型名称" rules={[{ required: true }]}><Input /></Form.Item></Col>
+                      <Col xs={24} md={10}><Form.Item name="file_name" label="文件名"><Input /></Form.Item></Col>
+                      <Col xs={24} md={6}><Form.Item name="file_type" label="文件类型"><Input placeholder="FCStd / STEP" /></Form.Item></Col>
+                      <Col xs={24} md={6}><Form.Item name="script_asset_id" label="关联脚本资产 ID"><Input /></Form.Item></Col>
+                      <Col xs={24} md={6}><Form.Item name="task_id" label="关联任务 ID"><Input /></Form.Item></Col>
+                      <Col xs={24} md={6}><Form.Item name="project_id" label="Project ID"><Input /></Form.Item></Col>
+                      <Col xs={24} md={12}><Form.Item name="storage_uri" label="存储地址"><Input /></Form.Item></Col>
+                      <Col xs={24} md={12}><Form.Item name="preview_uri" label="预览地址"><Input /></Form.Item></Col>
+                    </Row>
+                    <Button type="primary" htmlType="submit" disabled={!canWrite} loading={createModelMutation.isPending}>保存模型元数据</Button>
+                  </Form>
+                </Card>
+                <Card title="模型资产列表" className="console-card">
+                  <Table rowKey="id" className="balanced-table" columns={modelColumns} dataSource={models.data || []} loading={models.isLoading} scroll={{ x: 1280 }} tableLayout="fixed" pagination={{ pageSize: 10 }} />
+                </Card>
+              </Space>
+            )
+          }
+        ]}
+      />
+      <Drawer title={selectedScript ? `脚本版本 #${selectedScript.id}` : "脚本版本"} open={Boolean(selectedScript)} onClose={() => setSelectedScript(null)} width={860}>
+        <Space direction="vertical" size={12} className="full-width">
+          <Descriptions size="small" column={2} bordered>
+            <Descriptions.Item label="名称">{selectedScript?.name}</Descriptions.Item>
+            <Descriptions.Item label="当前版本">{selectedScript?.current_version ? `v${selectedScript.current_version}` : "-"}</Descriptions.Item>
+            <Descriptions.Item label="项目">{selectedScript?.project_id || "-"}</Descriptions.Item>
+            <Descriptions.Item label="模式">{selectedScript?.modeling_mode}</Descriptions.Item>
+          </Descriptions>
+          <Space>
+            <Button onClick={() => copyScriptText(currentVersion)}>复制当前脚本</Button>
+            <Button disabled={!selectedScript || !canWrite} onClick={() => selectedScript && reuseMutation.mutate(selectedScript)}>复用为模板</Button>
+          </Space>
+          <pre className="pre-block">{versions.isLoading ? "加载中..." : currentVersion?.script || "暂无脚本"}</pre>
+          <Table
+            rowKey="id"
+            columns={[
+              { title: "版本", dataIndex: "version", width: 90, render: (value) => `v${value}` },
+              { title: "摘要", dataIndex: "summary", ellipsis: true },
+              { title: "创建人", dataIndex: "created_by", width: 100 },
+              { title: "创建时间", dataIndex: "created_at", width: 180, render: (value) => formatShanghaiTime(value) },
+              {
+                title: "操作",
+                width: 180,
+                render: (_, row: ScriptVersion) => (
+                  <Space>
+                    <Button onClick={() => copyScriptText(row)}>复制</Button>
+                    <Button disabled={!canWrite || row.id === selectedScript?.current_version_id} onClick={() => selectedScript && rollbackMutation.mutate({ assetId: selectedScript.id, versionId: row.id })}>回滚</Button>
+                  </Space>
+                )
+              }
+            ]}
+            dataSource={versions.data || []}
+            loading={versions.isLoading}
+            pagination={false}
+            tableLayout="fixed"
+          />
+        </Space>
+      </Drawer>
+    </Space>
+  );
+}
+
 function TemplatesView({ role }: { role?: string }) {
   const token = useAppStore((state) => state.token);
   const workspaceId = useAppStore((state) => state.workspaceId);
@@ -501,6 +729,14 @@ function TemplatesView({ role }: { role?: string }) {
   });
   const updateMutation = useMutation({ mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => adminApi.updateTemplate(token, id, { enabled }), onSuccess: invalidate });
   const deleteMutation = useMutation({ mutationFn: (id: number) => adminApi.deleteTemplate(token, id), onSuccess: invalidate });
+  const seedMutation = useMutation({
+    mutationFn: () => adminApi.seedDefaultTemplates(token),
+    onSuccess: () => {
+      message.success("内置模板已导入");
+      invalidate();
+    },
+    onError: (error: Error) => message.error(error.message)
+  });
 
   const importTemplates = () => {
     try {
@@ -539,10 +775,10 @@ function TemplatesView({ role }: { role?: string }) {
   return (
     <Space direction="vertical" size={16} className="full-width">
       <Card title="新增模板" className="console-card">
-        <Form form={form} layout="vertical" initialValues={{ category: "common", enabled: true }} onFinish={(values) => createMutation.mutate(values)}>
+        <Form form={form} layout="vertical" initialValues={{ category: "通用", enabled: true }} onFinish={(values) => createMutation.mutate(values)}>
           <Row gutter={12}>
             <Col xs={24} md={10}><Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col xs={24} md={8}><Form.Item name="category" label="分类"><Input /></Form.Item></Col>
+            <Col xs={24} md={8}><Form.Item name="category" label="分类"><Select options={templateCategoryOptions} /></Form.Item></Col>
             <Col xs={24} md={6}><Form.Item name="enabled" label="启用" valuePropName="checked"><Switch /></Form.Item></Col>
           </Row>
           <Form.Item name="prompt" label="Prompt" rules={[{ required: true }]}><Input.TextArea rows={4} /></Form.Item>
@@ -550,9 +786,18 @@ function TemplatesView({ role }: { role?: string }) {
         </Form>
       </Card>
       <Card title="模板导入" className="console-card" extra={<Button type="primary" disabled={!canWrite} onClick={importTemplates}>导入 JSON</Button>}>
-        <Input.TextArea rows={4} value={importText} onChange={(event) => setImportText(event.target.value)} placeholder='{"templates":[{"name":"...","category":"common","prompt":"...","enabled":true}]}' />
+        <Input.TextArea rows={4} value={importText} onChange={(event) => setImportText(event.target.value)} placeholder='{"templates":[{"name":"...","category":"通用","prompt":"...","enabled":true}]}' />
       </Card>
-      <Card title="模板列表" className="console-card" extra={<Button onClick={() => adminApi.exportTemplates(token, workspaceId).then((rows) => downloadJson("freecadai_templates.json", { templates: rows }))}>导出 JSON</Button>}>
+      <Card
+        title="模板列表"
+        className="console-card"
+        extra={(
+          <Space>
+            <Button disabled={!canWrite} loading={seedMutation.isPending} onClick={() => seedMutation.mutate()}>导入内置模板</Button>
+            <Button onClick={() => adminApi.exportTemplates(token, workspaceId).then((rows) => downloadJson("freecadai_templates.json", { templates: rows }))}>导出 JSON</Button>
+          </Space>
+        )}
+      >
         <Table rowKey="id" className="template-table balanced-table" columns={columns} dataSource={templates.data || []} loading={templates.isLoading} scroll={{ x: 1260 }} tableLayout="fixed" pagination={{ pageSize: 10 }} />
       </Card>
     </Space>
