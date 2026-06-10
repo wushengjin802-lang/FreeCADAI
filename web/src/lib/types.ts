@@ -176,6 +176,9 @@ export type ApiKey = {
   name: string;
   prefix: string;
   status: string;
+  scopes?: string[];
+  created_by_user_id?: number | null;
+  expires_at?: string | null;
   last_used_at?: string | null;
   created_at: string;
 };
@@ -210,4 +213,80 @@ export type Health = {
   ok: boolean;
   service: string;
   redis: boolean;
+};
+
+export type ConsoleUser = {
+  id: number;
+  email: string;
+  phone: string;
+  display_name: string;
+  status: string;
+  last_login_at?: string | null;
+  created_at: string;
+};
+
+export type ConsoleWorkspace = {
+  id: number;
+  name: string;
+  plan: string;
+  status: string;
+  role: string;
+  created_at: string;
+  member_count: number;
+  api_key_count: number;
+  task_count: number;
+  asset_count: number;
+  quota?: BillingWorkspaceSummary;
+};
+
+export type ConsoleAuthResponse = {
+  token: string;
+  token_type: string;
+  expires_at: string;
+  user: ConsoleUser;
+  workspaces: ConsoleWorkspace[];
+};
+
+export type ConsoleMeResponse = {
+  user: ConsoleUser;
+  workspaces: ConsoleWorkspace[];
+};
+
+export type ConsoleMember = {
+  id: number;
+  workspace_id: number;
+  user_id: number;
+  email: string;
+  display_name: string;
+  role: string;
+  status: string;
+  joined_at?: string | null;
+  created_at: string;
+};
+
+export type ConsoleInvite = {
+  id: number;
+  workspace_id: number;
+  email: string;
+  role: string;
+  status: string;
+  expires_at: string;
+  invite_token?: string | null;
+  created_at: string;
+};
+
+export type ConsoleApiKeyCreateResponse = {
+  id: number;
+  api_key: string;
+  prefix: string;
+  item: ApiKey;
+};
+
+export type ConsolePluginGuide = {
+  workspace_id: number;
+  workspace_name: string;
+  saas_base_url: string;
+  verify_path: string;
+  login_path: string;
+  bind_path: string;
 };

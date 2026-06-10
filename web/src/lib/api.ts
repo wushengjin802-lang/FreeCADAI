@@ -6,6 +6,13 @@ import type {
   AuditLog,
   BillingPlan,
   BillingSummary,
+  ConsoleApiKeyCreateResponse,
+  ConsoleAuthResponse,
+  ConsoleInvite,
+  ConsoleMeResponse,
+  ConsoleMember,
+  ConsolePluginGuide,
+  ConsoleWorkspace,
   Health,
   LoginResponse,
   ModelAsset,
@@ -75,6 +82,67 @@ export async function login(username: string, password: string) {
   if (!response.ok) throw new Error(await parseError(response));
   return response.json() as Promise<LoginResponse>;
 }
+
+export async function consoleLogin(email: string, password: string) {
+  const response = await fetch(appPath("/api/v1/console/auth/login"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password })
+  });
+  if (!response.ok) throw new Error(await parseError(response));
+  return response.json() as Promise<ConsoleAuthResponse>;
+}
+
+export async function consoleRegister(body: { email: string; password: string; display_name: string; workspace_name?: string }) {
+  const response = await fetch(appPath("/api/v1/console/auth/register"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) throw new Error(await parseError(response));
+  return response.json() as Promise<ConsoleAuthResponse>;
+}
+
+export async function consoleAcceptInvite(inviteToken: string, body: { email: string; password: string; display_name: string; workspace_name?: string }) {
+  const response = await fetch(appPath(`/api/v1/console/invites/${inviteToken}/accept`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) throw new Error(await parseError(response));
+  return response.json() as Promise<ConsoleAuthResponse>;
+}
+
+export const consoleApi = {
+  me: (token: string) => apiFetch<ConsoleMeResponse>("/api/v1/console/auth/me", token),
+  logout: (token: string) => apiFetch<{ ok: boolean }>("/api/v1/console/auth/logout", token, { method: "POST" }),
+  changePassword: (token: string, body: { current_password: string; new_password: string }) =>
+    apiFetch<{ ok: boolean }>("/api/v1/console/auth/password", token, { method: "PUT", body: JSON.stringify(body) }),
+  workspaces: (token: string) => apiFetch<ConsoleWorkspace[]>("/api/v1/console/workspaces", token),
+  workspace: (token: string, workspaceId: number) => apiFetch<ConsoleWorkspace>(`/api/v1/console/workspaces/${workspaceId}`, token),
+  updateWorkspace: (token: string, workspaceId: number, body: { name?: string }) =>
+    apiFetch<ConsoleWorkspace>(`/api/v1/console/workspaces/${workspaceId}`, token, { method: "PUT", body: JSON.stringify(body) }),
+  members: (token: string, workspaceId: number) =>
+    apiFetch<ConsoleMember[]>(`/api/v1/console/workspaces/${workspaceId}/members`, token),
+  inviteMember: (token: string, workspaceId: number, body: { email: string; role: string }) =>
+    apiFetch<ConsoleInvite>(`/api/v1/console/workspaces/${workspaceId}/invites`, token, { method: "POST", body: JSON.stringify(body) }),
+  updateMember: (token: string, workspaceId: number, memberId: number, body: Partial<{ role: string; status: string }>) =>
+    apiFetch<ConsoleMember>(`/api/v1/console/workspaces/${workspaceId}/members/${memberId}`, token, { method: "PUT", body: JSON.stringify(body) }),
+  removeMember: (token: string, workspaceId: number, memberId: number) =>
+    apiFetch<{ ok: boolean }>(`/api/v1/console/workspaces/${workspaceId}/members/${memberId}`, token, { method: "DELETE" }),
+  apiKeys: (token: string, workspaceId: number) =>
+    apiFetch<ApiKey[]>(`/api/v1/console/api-keys${toQuery({ workspace_id: workspaceId })}`, token),
+  createApiKey: (token: string, body: { workspace_id: number; name: string; expires_in_days?: number | null; scopes?: string[] }) =>
+    apiFetch<ConsoleApiKeyCreateResponse>("/api/v1/console/api-keys", token, { method: "POST", body: JSON.stringify(body) }),
+  enableApiKey: (token: string, id: number) =>
+    apiFetch<ApiKey>(`/api/v1/console/api-keys/${id}/enable`, token, { method: "POST" }),
+  disableApiKey: (token: string, id: number) =>
+    apiFetch<ApiKey>(`/api/v1/console/api-keys/${id}/disable`, token, { method: "POST" }),
+  rotateApiKey: (token: string, id: number) =>
+    apiFetch<ConsoleApiKeyCreateResponse>(`/api/v1/console/api-keys/${id}/rotate`, token, { method: "POST" }),
+  pluginGuide: (token: string, workspaceId: number) =>
+    apiFetch<ConsolePluginGuide>(`/api/v1/console/plugin/connection-guide${toQuery({ workspace_id: workspaceId })}`, token)
+};
 
 export const adminApi = {
   me: (token: string) => apiFetch<AdminPrincipal>("/api/v1/admin/auth/me", token),

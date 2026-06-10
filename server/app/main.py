@@ -5,6 +5,9 @@ from fastapi import FastAPI
 from server.app.api.admin import auth_router as admin_auth_router
 from server.app.api.admin import billing_router
 from server.app.api.admin import router as admin_router
+from server.app.api.console import auth_router as console_auth_router
+from server.app.api.console import public_router as console_public_router
+from server.app.api.console import router as console_router
 from server.app.api.plugin import router as plugin_router
 from server.app.core.config import settings
 from server.app.core.redis import redis_ping
@@ -23,6 +26,9 @@ app.include_router(plugin_router)
 app.include_router(billing_router)
 app.include_router(admin_auth_router)
 app.include_router(admin_router)
+app.include_router(console_auth_router)
+app.include_router(console_public_router)
+app.include_router(console_router)
 
 
 @app.get("/")
@@ -36,6 +42,7 @@ def root():
         "admin": "/admin",
         "plugin_base": "/api/v1/plugin",
         "admin_base": "/api/v1/admin",
+        "console_base": "/api/v1/console",
     }
 
 

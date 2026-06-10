@@ -12,11 +12,13 @@ from sqlalchemy.orm import Session
 
 from server.app.core.config import settings
 from server.app.db.session import get_db
-from server.app.models.entities import AdminSession, AdminUser, ApiKey, Workspace
+from server.app.models.entities import AdminSession, AdminUser, ApiKey, User, UserSession, Workspace, WorkspaceMember
 
 
 _admin_actor = ContextVar("admin_actor", default="admin")
 _admin_principal = ContextVar("admin_principal", default={"id": None, "username": "admin", "role": "viewer"})
+_user_actor = ContextVar("user_actor", default="user:anonymous")
+_user_principal = ContextVar("user_principal", default={"id": None, "email": "", "display_name": "", "status": "anonymous"})
 
 
 def hash_api_key(api_key):
@@ -54,6 +56,14 @@ def current_admin_principal():
     return _admin_principal.get()
 
 
+def current_user_actor():
+    return _user_actor.get()
+
+
+def current_user_principal():
+    return _user_principal.get()
+
+
 def authenticate_plugin(db: Session = Depends(get_db), authorization: str = Header(default="")):
     token = _extract_bearer(authorization)
     if settings.plugin_api_key and hmac.compare_digest(token, settings.plugin_api_key):
@@ -70,6 +80,10 @@ def authenticate_plugin(db: Session = Depends(get_db), authorization: str = Head
     ).scalar_one_or_none()
     if api_key is None:
         raise HTTPException(status_code=403, detail="Invalid plugin API key.")
+    if api_key.expires_at is not None and api_key.expires_at <= datetime.utcnow():
+        api_key.status = "expired"
+        db.commit()
+        raise HTTPException(status_code=403, detail="Plugin API key has expired.")
     api_key.last_used_at = datetime.utcnow()
     workspace = db.execute(select(Workspace).where(Workspace.id == api_key.workspace_id)).scalar_one_or_none()
     if workspace is None or workspace.status != "active":
@@ -86,6 +100,21 @@ def create_admin_session(db: Session, user: AdminUser):
         expires_at=datetime.utcnow() + timedelta(hours=settings.admin_session_hours),
     )
     user.last_login_at = datetime.utcnow()
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return raw_token, item
+
+
+def create_user_session(db: Session, user: User):
+    raw_token = "fcai_user_" + secrets.token_urlsafe(36)
+    item = UserSession(
+        user_id=user.id,
+        token_hash=hash_api_key(raw_token),
+        expires_at=datetime.utcnow() + timedelta(hours=settings.user_session_hours),
+    )
+    user.last_login_at = datetime.utcnow()
+    user.updated_at = datetime.utcnow()
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -126,3 +155,46 @@ def authenticate_admin(db: Session = Depends(get_db), authorization: str = Heade
     _admin_actor.set(user.username)
     _admin_principal.set(principal)
     return principal
+
+
+def authenticate_user(db: Session = Depends(get_db), authorization: str = Header(default="")):
+    token = _extract_bearer(authorization)
+    session = db.execute(
+        select(UserSession).where(
+            UserSession.token_hash == hash_api_key(token),
+            UserSession.status == "active",
+            UserSession.expires_at > datetime.utcnow(),
+        )
+    ).scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=403, detail="Invalid user session.")
+    user = db.get(User, session.user_id)
+    if user is None or user.status != "active":
+        raise HTTPException(status_code=403, detail="User is not active.")
+    principal = {"id": user.id, "email": user.email, "display_name": user.display_name, "status": user.status}
+    _user_actor.set("user:{}".format(user.id))
+    _user_principal.set(principal)
+    return principal
+
+
+def require_workspace_member(
+    db: Session,
+    user_id: int,
+    workspace_id: int,
+    allowed_roles: set[str] | None = None,
+):
+    member = db.execute(
+        select(WorkspaceMember).where(
+            WorkspaceMember.workspace_id == workspace_id,
+            WorkspaceMember.user_id == user_id,
+            WorkspaceMember.status == "active",
+        )
+    ).scalar_one_or_none()
+    if member is None:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    if allowed_roles is not None and member.role not in allowed_roles:
+        raise HTTPException(status_code=403, detail="Permission denied.")
+    workspace = db.get(Workspace, workspace_id)
+    if workspace is None or workspace.status != "active":
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    return workspace, member
