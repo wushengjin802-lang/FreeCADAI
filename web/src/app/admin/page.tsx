@@ -66,6 +66,25 @@ function formatMoney(value?: number) {
   return `$${Number(value || 0).toFixed(4)}`;
 }
 
+function formatShanghaiTime(value?: string | null) {
+  if (!value) return "-";
+  const source = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`;
+  const date = new Date(source);
+  if (Number.isNaN(date.getTime())) return value;
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value || "";
+  return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}:${get("second")}`;
+}
+
 function formatLimit(value?: number | null) {
   return value == null ? "不限" : String(value);
 }
@@ -221,8 +240,18 @@ function Dashboard({
     [daily]
   );
   const warnings = billing?.workspaces.flatMap((workspace) => workspace.warnings.map((warning) => `${workspace.workspace_name}: ${warning}`)) || [];
+  const displayProvider = (provider: string, model: string) => {
+    const providerText = (provider || "").toLowerCase();
+    const modelText = (model || "").toLowerCase();
+    if (providerText.includes("deepseek") || modelText.includes("deepseek")) return "deepseek";
+    if ((providerText === "openai" || providerText === "openai-compatible") && modelText.startsWith("gpt-")) return "openai";
+    return provider || "openai-compatible";
+  };
   const modelColumns: ColumnsType<UsageByModelItem> = [
-    { title: "Provider", dataIndex: "provider", width: 150 },
+    { title: "Provider", dataIndex: "provider", width: 140, render: (value, row) => {
+      const provider = displayProvider(value, row.model);
+      return <Tag color={provider === "deepseek" ? "blue" : "default"}>{provider}</Tag>;
+    } },
     { title: "模型", dataIndex: "model" },
     { title: "请求数", dataIndex: "request_count", width: 100 },
     { title: "输入 Token", dataIndex: "input_tokens", width: 130 },
@@ -251,7 +280,7 @@ function Dashboard({
         <ReactECharts option={option} style={{ height: 330 }} />
       </Card>
       <Card title="按模型用量" className="console-card">
-        <Table rowKey={(row) => `${row.provider}-${row.model}`} columns={modelColumns} dataSource={usageByModel} pagination={false} scroll={{ x: 950 }} />
+        <Table rowKey={(row) => `${row.provider}-${row.model}`} className="usage-model-table balanced-table" columns={modelColumns} dataSource={usageByModel} pagination={false} scroll={{ x: 1120 }} tableLayout="fixed" />
       </Card>
     </Space>
   );
@@ -317,7 +346,7 @@ function WorkspacesView({ workspaces, role }: { workspaces: Workspace[]; role?: 
       width: 220,
       render: (_, row) => row.quota?.warnings.length ? row.quota.warnings.map((warning) => <Tag key={warning} color="gold">{warning}</Tag>) : <Tag color="green">正常</Tag>
     },
-    { title: "创建时间", dataIndex: "created_at", width: 180 },
+    { title: "创建时间", dataIndex: "created_at", width: 180, render: (value) => formatShanghaiTime(value) },
     {
       title: "操作",
       width: 180,
@@ -402,7 +431,7 @@ function TasksView({ role }: { role?: string }) {
     { title: "模式", dataIndex: "modeling_mode", width: 130 },
     { title: "模型", dataIndex: "model", width: 160 },
     { title: "需求", dataIndex: "prompt", ellipsis: true },
-    { title: "创建时间", dataIndex: "created_at", width: 180 },
+    { title: "创建时间", dataIndex: "created_at", width: 180, render: (value) => formatShanghaiTime(value) },
     {
       title: "操作",
       width: 180,
@@ -569,8 +598,8 @@ function KeysView({ role, workspaces }: { role?: string; workspaces: Workspace[]
     { title: "名称", dataIndex: "name" },
     { title: "前缀", dataIndex: "prefix", width: 140 },
     { title: "状态", dataIndex: "status", width: 110, render: (status) => <Tag color={statusColor(status)}>{status}</Tag> },
-    { title: "最近使用", dataIndex: "last_used_at", width: 170, render: (value) => value || "-" },
-    { title: "创建时间", dataIndex: "created_at", width: 180 },
+    { title: "最近使用", dataIndex: "last_used_at", width: 170, render: (value) => formatShanghaiTime(value) },
+    { title: "创建时间", dataIndex: "created_at", width: 180, render: (value) => formatShanghaiTime(value) },
     {
       title: "操作",
       width: 180,
@@ -625,8 +654,8 @@ function AdminUsersView({ role }: { role?: string }) {
     { title: "用户名", dataIndex: "username" },
     { title: "角色", dataIndex: "role", width: 120 },
     { title: "状态", dataIndex: "status", width: 110, render: (status) => <Tag color={statusColor(status)}>{status}</Tag> },
-    { title: "最近登录", dataIndex: "last_login_at", width: 170, render: (value) => value || "-" },
-    { title: "创建时间", dataIndex: "created_at", width: 180 },
+    { title: "最近登录", dataIndex: "last_login_at", width: 170, render: (value) => formatShanghaiTime(value) },
+    { title: "创建时间", dataIndex: "created_at", width: 180, render: (value) => formatShanghaiTime(value) },
     {
       title: "操作",
       width: 220,
@@ -668,9 +697,10 @@ function AuditView({ workspaces }: { workspaces: Workspace[] }) {
     () => new Map(workspaces.map((workspace) => [workspace.id, workspace.name])),
     [workspaces]
   );
+  const displayWorkspace = (value?: number | null) => value ? (workspaceNameById.get(value) || `工作区 ID ${value}`) : "-";
   const columns: ColumnsType<AuditLog> = [
     { title: "ID", dataIndex: "id", width: 80 },
-    { title: "时间", dataIndex: "created_at", width: 180 },
+    { title: "时间", dataIndex: "created_at", width: 180, render: (value) => formatShanghaiTime(value) },
     { title: "操作者", dataIndex: "actor", width: 150 },
     { title: "动作", dataIndex: "action", width: 180 },
     { title: "对象", width: 160, render: (_, row) => `${row.target_type} #${row.target_id}` },
@@ -681,14 +711,14 @@ function AuditView({ workspaces }: { workspaces: Workspace[] }) {
     "dataIndex" in column && column.dataIndex === "workspace_id"
       ? {
           ...column,
-          width: 180,
-          render: (value) => value ? (workspaceNameById.get(value) ? `${workspaceNameById.get(value)}（ID ${value}）` : `工作区 ID ${value}`) : "-"
+          width: 293,
+          render: (value) => displayWorkspace(value)
         }
       : column
   );
   return (
     <Card title="审计日志" className="console-card">
-      <Table rowKey="id" columns={displayColumns} dataSource={logs.data || []} loading={logs.isLoading} scroll={{ x: 1130 }} pagination={{ pageSize: 15 }} />
+      <Table rowKey="id" className="audit-log-table balanced-table" columns={displayColumns} dataSource={logs.data || []} loading={logs.isLoading} scroll={{ x: 1393 }} tableLayout="fixed" pagination={{ pageSize: 15 }} />
     </Card>
   );
 }

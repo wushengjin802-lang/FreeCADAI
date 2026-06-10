@@ -117,6 +117,10 @@ body {
   color: var(--console-muted);
 }
 
+.ant-table-thead > tr > th {
+  text-align: center !important;
+}
+
 .balanced-table .ant-table table,
 .api-key-table .ant-table table {
   table-layout: fixed !important;
@@ -227,6 +231,61 @@ body {
   width: 188px !important;
 }
 
+.usage-model-table .ant-table {
+  min-width: 1120px;
+}
+
+.usage-model-table col:nth-child(1) {
+  width: 140px !important;
+}
+
+.usage-model-table col:nth-child(2) {
+  width: 360px !important;
+}
+
+.usage-model-table col:nth-child(3) {
+  width: 100px !important;
+}
+
+.usage-model-table col:nth-child(4),
+.usage-model-table col:nth-child(5),
+.usage-model-table col:nth-child(6),
+.usage-model-table col:nth-child(7) {
+  width: 130px !important;
+}
+
+.audit-log-table .ant-table {
+  min-width: 1393px;
+}
+
+.audit-log-table col:nth-child(1) {
+  width: 72px !important;
+}
+
+.audit-log-table col:nth-child(2) {
+  width: 180px !important;
+}
+
+.audit-log-table col:nth-child(3) {
+  width: 150px !important;
+}
+
+.audit-log-table col:nth-child(4) {
+  width: 190px !important;
+}
+
+.audit-log-table col:nth-child(5) {
+  width: 170px !important;
+}
+
+.audit-log-table col:nth-child(6) {
+  width: 293px !important;
+}
+
+.audit-log-table col:nth-child(7) {
+  width: 338px !important;
+}
+
 .api-key-table .ant-table {
   min-width: 1380px;
 }
@@ -278,7 +337,8 @@ body {
 .template-table td:nth-child(3),
 .template-table td:nth-child(6),
 .admin-user-table td:nth-child(5),
-.admin-user-table td:nth-child(6) {
+.admin-user-table td:nth-child(6),
+.usage-model-table td:nth-child(2) {
   white-space: normal;
   word-break: break-word;
 }
@@ -292,8 +352,22 @@ body {
 .template-table th:nth-child(5),
 .template-table td:nth-child(5),
 .admin-user-table th:nth-child(4),
-.admin-user-table td:nth-child(4) {
+.admin-user-table td:nth-child(4),
+.usage-model-table th:nth-child(n + 3),
+.usage-model-table td:nth-child(n + 3) {
   text-align: center;
+}
+
+.audit-log-table th:nth-child(-n + 6),
+.audit-log-table td:nth-child(-n + 6) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-log-table td:nth-child(7) {
+  white-space: normal;
+  word-break: break-word;
 }
 
 .workspace-table th:nth-child(10),
@@ -309,6 +383,11 @@ body {
 .template-table td:nth-child(7) .ant-space,
 .admin-user-table td:nth-child(7) .ant-space {
   justify-content: flex-end;
+}
+
+.usage-model-table th:nth-child(n + 3),
+.usage-model-table td:nth-child(n + 3) {
+  text-align: right;
 }
 
 .api-key-table td:nth-child(2),

@@ -1,6 +1,7 @@
 """Environment based settings for the SaaS backend."""
 
 import os
+from urllib.parse import urlparse
 
 try:
     from dotenv import load_dotenv
@@ -28,6 +29,19 @@ class Settings:
     admin_password = os.getenv("FREECADAI_ADMIN_PASSWORD", "")
     admin_session_hours = int(os.getenv("FREECADAI_ADMIN_SESSION_HOURS", "12"))
     auto_migrate = os.getenv("FREECADAI_AUTO_MIGRATE", "1").lower() in {"1", "true", "yes", "on"}
+
+    @property
+    def llm_provider(self) -> str:
+        explicit = os.getenv("FREECADAI_LLM_PROVIDER", "").strip()
+        if explicit:
+            return explicit
+        host = (urlparse(self.llm_base_url).hostname or "").lower()
+        model = (self.llm_model or "").lower()
+        if "deepseek" in host or "deepseek" in model:
+            return "deepseek"
+        if "openai" in host or model.startswith("gpt-"):
+            return "openai"
+        return "openai-compatible"
 
 
 settings = Settings()

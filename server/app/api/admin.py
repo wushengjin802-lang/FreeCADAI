@@ -738,6 +738,15 @@ def usage_daily(db: Session = Depends(get_db), days: int = Query(default=14, ge=
 
 @router.get("/usage/by-model", response_model=list[UsageByModelItem])
 def usage_by_model(db: Session = Depends(get_db), workspace_id: int | None = None):
+    def normalize_provider(provider: str, model: str) -> str:
+        provider_text = (provider or "").lower()
+        model_text = (model or "").lower()
+        if "deepseek" in provider_text or "deepseek" in model_text:
+            return "deepseek"
+        if provider_text in {"openai", "openai-compatible"} and model_text.startswith("gpt-"):
+            return "openai"
+        return provider or "openai-compatible"
+
     stmt = select(
         UsageRecord.provider,
         UsageRecord.model,
@@ -750,17 +759,36 @@ def usage_by_model(db: Session = Depends(get_db), workspace_id: int | None = Non
     if workspace_id is not None:
         stmt = stmt.where(UsageRecord.workspace_id == workspace_id)
     rows = db.execute(stmt).all()
+    grouped = {}
+    for row in rows:
+        provider = normalize_provider(row[0], row[1])
+        key = (provider, row[1])
+        item = grouped.setdefault(
+            key,
+            {
+                "request_count": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "estimated_cost": 0.0,
+            },
+        )
+        item["request_count"] += int(row[2] or 0)
+        item["input_tokens"] += int(row[3] or 0)
+        item["output_tokens"] += int(row[4] or 0)
+        item["total_tokens"] += int(row[5] or 0)
+        item["estimated_cost"] += float(row[6] or 0)
     return [
         UsageByModelItem(
-            provider=row[0],
-            model=row[1],
-            request_count=int(row[2] or 0),
-            input_tokens=int(row[3] or 0),
-            output_tokens=int(row[4] or 0),
-            total_tokens=int(row[5] or 0),
-            estimated_cost=float(row[6] or 0),
+            provider=provider,
+            model=model,
+            request_count=item["request_count"],
+            input_tokens=item["input_tokens"],
+            output_tokens=item["output_tokens"],
+            total_tokens=item["total_tokens"],
+            estimated_cost=item["estimated_cost"],
         )
-        for row in rows
+        for (provider, model), item in sorted(grouped.items())
     ]
 
 

@@ -16,6 +16,7 @@ def create_task(db: Session, workspace: Workspace, action, prompt, context, mode
         modeling_mode=modeling_mode,
         prompt=prompt,
         context_snapshot=context or "",
+        provider=settings.llm_provider,
         model=settings.llm_model,
         status=status,
     )
