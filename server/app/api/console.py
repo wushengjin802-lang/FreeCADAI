@@ -15,11 +15,13 @@ from server.app.models.entities import (
     GeneratedScript,
     GenerationTask,
     ModelAsset,
+    Notification,
     ScriptAsset,
     ScriptVersion,
     Template,
     User,
     UserSession,
+    UsageRecord,
     Workspace,
     WorkspaceInvite,
     WorkspaceMember,
@@ -44,6 +46,9 @@ from server.app.schemas.console import (
     ConsoleTaskListItem,
     ConsoleTaskSubmitResponse,
     ConsoleTemplateOut,
+    ConsoleNotificationOut,
+    ConsoleUsageMemberItem,
+    ConsoleUsageProjectItem,
     ConsoleUserOut,
     ConsoleWorkspaceOut,
     ConsoleWorkspaceUpdate,
@@ -61,6 +66,14 @@ from server.app.schemas.admin import (
     TemplateImportRequest,
     TemplateOut,
     TemplateUpdate,
+    AuditLogOut,
+    BillingPlanOut,
+    BillingSummaryOut,
+    PaymentCheckoutRequest,
+    PaymentCheckoutResponse,
+    UsageByModelItem,
+    UsageDailyItem,
+    UsageSummary,
 )
 from server.app.services.auth import (
     authenticate_user,
@@ -74,6 +87,7 @@ from server.app.services.auth import (
 from server.app.services.assets import copy_script_asset, current_script_version, touch_asset
 from server.app.services.billing import quota_summary
 from server.app.services.billing import assert_workspace_quota
+from server.app.services.billing import billing_plans
 from server.app.services.task_queue import enqueue_generation_task, load_generation_task_payload, retry_generation_task
 from server.app.services.task_store import create_task
 
@@ -270,6 +284,34 @@ def _model_asset_out(row: ModelAsset):
     )
 
 
+def _notification_out(row: Notification):
+    return ConsoleNotificationOut(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        user_id=row.user_id,
+        title=row.title,
+        body=row.body,
+        level=row.level,
+        status=row.status,
+        metadata=row.metadata_json,
+        read_at=row.read_at.isoformat(timespec="seconds") if row.read_at else None,
+        created_at=row.created_at.isoformat(timespec="seconds"),
+    )
+
+
+def _audit_out(row: AuditLog):
+    return AuditLogOut(
+        id=row.id,
+        actor=row.actor,
+        action=row.action,
+        target_type=row.target_type,
+        target_id=row.target_id,
+        workspace_id=row.workspace_id,
+        metadata=row.metadata_json,
+        created_at=row.created_at.isoformat(timespec="seconds"),
+    )
+
+
 def _asset_created_by_user_id(db: Session, asset: ScriptAsset | ModelAsset):
     task_id = getattr(asset, "task_id", None)
     if not task_id:
@@ -293,6 +335,33 @@ def _audit(db: Session, action: str, target_type: str, target_id="", workspace_i
             metadata_json=metadata or {},
         )
     )
+
+
+def _sync_quota_notifications(db: Session, workspace: Workspace):
+    summary = quota_summary(db, workspace)
+    for warning in summary.get("warnings", []):
+        exists = db.execute(
+            select(Notification).where(
+                Notification.workspace_id == workspace.id,
+                Notification.user_id.is_(None),
+                Notification.title == "套餐用量提醒",
+                Notification.body == warning,
+                Notification.status == "unread",
+            )
+        ).scalar_one_or_none()
+        if exists is None:
+            db.add(
+                Notification(
+                    workspace_id=workspace.id,
+                    title="套餐用量提醒",
+                    body=warning,
+                    level="warning",
+                    status="unread",
+                    metadata_json={"source": "quota", "plan": workspace.plan},
+                    created_at=datetime.utcnow(),
+                )
+            )
+    return summary
 
 
 @auth_router.post("/register", response_model=ConsoleAuthResponse)
@@ -723,6 +792,304 @@ def retry_task(task_id: int, db: Session = Depends(get_db), user=Depends(authent
     db.commit()
     retry_generation_task(task.id)
     return ConsoleTaskActionResponse(ok=True, task_id=task.id, status=task.status, message="Task queued again.")
+
+
+def _usage_scope(member: WorkspaceMember, user_id: int):
+    return None if member.role in CONSOLE_WRITE_ROLES else user_id
+
+
+@router.get("/usage", response_model=UsageSummary)
+def console_usage_summary(workspace_id: int, db: Session = Depends(get_db), user=Depends(authenticate_user)):
+    _workspace, member = require_workspace_member(db, user["id"], workspace_id)
+    user_scope = _usage_scope(member, user["id"])
+    task_stmt = select(func.count()).select_from(GenerationTask).where(GenerationTask.workspace_id == workspace_id)
+    succeeded_stmt = select(func.count()).select_from(GenerationTask).where(GenerationTask.workspace_id == workspace_id, GenerationTask.status == "succeeded")
+    failed_stmt = select(func.count()).select_from(GenerationTask).where(GenerationTask.workspace_id == workspace_id, GenerationTask.status == "failed")
+    usage_stmt = select(
+        func.coalesce(func.sum(UsageRecord.input_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.output_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.total_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.estimated_cost), 0),
+    ).where(UsageRecord.workspace_id == workspace_id)
+    task_ids = select(GenerationTask.id).where(GenerationTask.workspace_id == workspace_id)
+    if user_scope is not None:
+        task_stmt = task_stmt.where(GenerationTask.created_by_user_id == user_scope)
+        succeeded_stmt = succeeded_stmt.where(GenerationTask.created_by_user_id == user_scope)
+        failed_stmt = failed_stmt.where(GenerationTask.created_by_user_id == user_scope)
+        task_ids = task_ids.where(GenerationTask.created_by_user_id == user_scope)
+    usage_stmt = usage_stmt.where(UsageRecord.task_id.in_(task_ids))
+    report_stmt = select(func.count()).select_from(ExecutionReport).where(ExecutionReport.task_id.in_(task_ids))
+    usage = db.execute(usage_stmt).one()
+    return UsageSummary(
+        task_count=int(db.scalar(task_stmt) or 0),
+        succeeded_count=int(db.scalar(succeeded_stmt) or 0),
+        failed_count=int(db.scalar(failed_stmt) or 0),
+        report_count=int(db.scalar(report_stmt) or 0),
+        input_tokens=int(usage[0] or 0),
+        output_tokens=int(usage[1] or 0),
+        total_tokens=int(usage[2] or 0),
+        estimated_cost=float(usage[3] or 0),
+    )
+
+
+@router.get("/usage/daily", response_model=list[UsageDailyItem])
+def console_usage_daily(
+    workspace_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(authenticate_user),
+    days: int = Query(default=14, ge=1, le=90),
+):
+    _workspace, member = require_workspace_member(db, user["id"], workspace_id)
+    user_scope = _usage_scope(member, user["id"])
+    start_day = (datetime.utcnow() - timedelta(days=days - 1)).date()
+    buckets = {
+        (start_day + timedelta(days=index)).isoformat(): {
+            "task_count": 0,
+            "succeeded_count": 0,
+            "failed_count": 0,
+            "report_count": 0,
+            "total_tokens": 0,
+            "estimated_cost": 0,
+        }
+        for index in range(days)
+    }
+    task_stmt = select(GenerationTask).where(
+        GenerationTask.workspace_id == workspace_id,
+        GenerationTask.created_at >= datetime.combine(start_day, datetime.min.time()),
+    )
+    if user_scope is not None:
+        task_stmt = task_stmt.where(GenerationTask.created_by_user_id == user_scope)
+    task_rows = db.execute(task_stmt).scalars().all()
+    task_ids = [task.id for task in task_rows]
+    for task in task_rows:
+        key = task.created_at.date().isoformat()
+        if key in buckets:
+            buckets[key]["task_count"] += 1
+            if task.status == "succeeded":
+                buckets[key]["succeeded_count"] += 1
+            if task.status == "failed":
+                buckets[key]["failed_count"] += 1
+    if task_ids:
+        report_rows = db.execute(
+            select(ExecutionReport).where(
+                ExecutionReport.task_id.in_(task_ids),
+                ExecutionReport.created_at >= datetime.combine(start_day, datetime.min.time()),
+            )
+        ).scalars().all()
+        for report in report_rows:
+            key = report.created_at.date().isoformat()
+            if key in buckets:
+                buckets[key]["report_count"] += 1
+        usage_rows = db.execute(
+            select(UsageRecord).where(
+                UsageRecord.task_id.in_(task_ids),
+                UsageRecord.created_at >= datetime.combine(start_day, datetime.min.time()),
+            )
+        ).scalars().all()
+        for usage in usage_rows:
+            key = usage.created_at.date().isoformat()
+            if key in buckets:
+                buckets[key]["total_tokens"] += int(usage.total_tokens or 0)
+                buckets[key]["estimated_cost"] += float(usage.estimated_cost or 0)
+    return [UsageDailyItem(day=day, **values) for day, values in buckets.items()]
+
+
+@router.get("/usage/by-model", response_model=list[UsageByModelItem])
+def console_usage_by_model(workspace_id: int, db: Session = Depends(get_db), user=Depends(authenticate_user)):
+    _workspace, member = require_workspace_member(db, user["id"], workspace_id)
+    task_ids = select(GenerationTask.id).where(GenerationTask.workspace_id == workspace_id)
+    if member.role not in CONSOLE_WRITE_ROLES:
+        task_ids = task_ids.where(GenerationTask.created_by_user_id == user["id"])
+    stmt = select(
+        UsageRecord.provider,
+        UsageRecord.model,
+        func.count(UsageRecord.id),
+        func.coalesce(func.sum(UsageRecord.input_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.output_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.total_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.estimated_cost), 0),
+    ).where(UsageRecord.workspace_id == workspace_id, UsageRecord.task_id.in_(task_ids)).group_by(UsageRecord.provider, UsageRecord.model)
+    rows = db.execute(stmt).all()
+    return [
+        UsageByModelItem(
+            provider=row[0] or "openai-compatible",
+            model=row[1] or "",
+            request_count=int(row[2] or 0),
+            input_tokens=int(row[3] or 0),
+            output_tokens=int(row[4] or 0),
+            total_tokens=int(row[5] or 0),
+            estimated_cost=float(row[6] or 0),
+        )
+        for row in rows
+    ]
+
+
+@router.get("/usage/by-member", response_model=list[ConsoleUsageMemberItem])
+def console_usage_by_member(workspace_id: int, db: Session = Depends(get_db), user=Depends(authenticate_user)):
+    _workspace, member = require_workspace_member(db, user["id"], workspace_id)
+    if member.role not in CONSOLE_WRITE_ROLES:
+        user_ids = [user["id"]]
+    else:
+        user_ids = [
+            row.user_id
+            for row in db.execute(select(WorkspaceMember).where(WorkspaceMember.workspace_id == workspace_id, WorkspaceMember.status == "active")).scalars().all()
+        ]
+    result = []
+    for user_id in user_ids:
+        row_user = db.get(User, user_id)
+        task_ids = select(GenerationTask.id).where(GenerationTask.workspace_id == workspace_id, GenerationTask.created_by_user_id == user_id)
+        task_count = db.scalar(select(func.count()).select_from(GenerationTask).where(GenerationTask.workspace_id == workspace_id, GenerationTask.created_by_user_id == user_id)) or 0
+        usage = db.execute(
+            select(
+                func.coalesce(func.sum(UsageRecord.input_tokens), 0),
+                func.coalesce(func.sum(UsageRecord.output_tokens), 0),
+                func.coalesce(func.sum(UsageRecord.total_tokens), 0),
+                func.coalesce(func.sum(UsageRecord.estimated_cost), 0),
+            ).where(UsageRecord.workspace_id == workspace_id, UsageRecord.task_id.in_(task_ids))
+        ).one()
+        result.append(
+            ConsoleUsageMemberItem(
+                user_id=user_id,
+                email=row_user.email if row_user else "",
+                display_name=row_user.display_name if row_user else "",
+                task_count=int(task_count),
+                input_tokens=int(usage[0] or 0),
+                output_tokens=int(usage[1] or 0),
+                total_tokens=int(usage[2] or 0),
+                estimated_cost=float(usage[3] or 0),
+            )
+        )
+    return result
+
+
+@router.get("/usage/by-project", response_model=list[ConsoleUsageProjectItem])
+def console_usage_by_project(workspace_id: int, db: Session = Depends(get_db), user=Depends(authenticate_user)):
+    _workspace, member = require_workspace_member(db, user["id"], workspace_id)
+    task_stmt = select(
+        GenerationTask.project_id,
+        func.count(GenerationTask.id),
+        func.coalesce(func.sum(UsageRecord.input_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.output_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.total_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.estimated_cost), 0),
+    ).outerjoin(UsageRecord, UsageRecord.task_id == GenerationTask.id).where(GenerationTask.workspace_id == workspace_id)
+    if member.role not in CONSOLE_WRITE_ROLES:
+        task_stmt = task_stmt.where(GenerationTask.created_by_user_id == user["id"])
+    rows = db.execute(task_stmt.group_by(GenerationTask.project_id).order_by(desc(func.count(GenerationTask.id)))).all()
+    return [
+        ConsoleUsageProjectItem(
+            project_id=row[0] or "未归档项目",
+            task_count=int(row[1] or 0),
+            input_tokens=int(row[2] or 0),
+            output_tokens=int(row[3] or 0),
+            total_tokens=int(row[4] or 0),
+            estimated_cost=float(row[5] or 0),
+        )
+        for row in rows
+    ]
+
+
+@router.get("/billing/plans", response_model=list[BillingPlanOut])
+def console_billing_plans(db: Session = Depends(get_db), user=Depends(authenticate_user)):
+    return billing_plans()
+
+
+@router.get("/billing/summary", response_model=BillingSummaryOut)
+def console_billing_summary(workspace_id: int, db: Session = Depends(get_db), user=Depends(authenticate_user)):
+    workspace, _member = require_workspace_member(db, user["id"], workspace_id)
+    summary = _sync_quota_notifications(db, workspace)
+    db.commit()
+    return BillingSummaryOut(workspaces=[summary])
+
+
+@router.post("/billing/checkout", response_model=PaymentCheckoutResponse)
+def console_payment_checkout(payload: PaymentCheckoutRequest, db: Session = Depends(get_db), user=Depends(authenticate_user)):
+    workspace, _member = require_workspace_member(db, user["id"], payload.workspace_id, CONSOLE_WRITE_ROLES)
+    if payload.plan not in {item["name"] for item in billing_plans()}:
+        raise HTTPException(status_code=400, detail="Unknown billing plan.")
+    _audit(
+        db,
+        "console.billing.checkout.requested",
+        "workspace",
+        workspace.id,
+        workspace.id,
+        {"current_plan": workspace.plan, "target_plan": payload.plan, "provider": "placeholder"},
+    )
+    db.commit()
+    return PaymentCheckoutResponse(
+        ok=True,
+        provider="placeholder",
+        checkout_url=None,
+        message="支付接口已预留；接入支付服务后将在这里返回 checkout_url。",
+    )
+
+
+@router.get("/audit-logs", response_model=list[AuditLogOut])
+def console_audit_logs(
+    workspace_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(authenticate_user),
+    limit: int = Query(default=80, ge=1, le=300),
+    offset: int = Query(default=0, ge=0),
+    action: str = "",
+):
+    require_workspace_member(db, user["id"], workspace_id, CONSOLE_WRITE_ROLES)
+    stmt = select(AuditLog).where(AuditLog.workspace_id == workspace_id).order_by(desc(AuditLog.id)).offset(offset).limit(limit)
+    if action:
+        stmt = stmt.where(AuditLog.action == action)
+    rows = db.execute(stmt).scalars().all()
+    return [_audit_out(row) for row in rows]
+
+
+@router.get("/notifications", response_model=list[ConsoleNotificationOut])
+def list_notifications(
+    workspace_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(authenticate_user),
+    unread_only: bool = False,
+):
+    require_workspace_member(db, user["id"], workspace_id)
+    stmt = select(Notification).where(
+        Notification.workspace_id == workspace_id,
+        or_(Notification.user_id.is_(None), Notification.user_id == user["id"]),
+    )
+    if unread_only:
+        stmt = stmt.where(Notification.status == "unread")
+    rows = db.execute(stmt.order_by(desc(Notification.id)).limit(100)).scalars().all()
+    return [_notification_out(row) for row in rows]
+
+
+@router.post("/notifications/{notification_id}/read", response_model=ConsoleNotificationOut)
+def read_notification(notification_id: int, db: Session = Depends(get_db), user=Depends(authenticate_user)):
+    item = db.get(Notification, notification_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Notification not found.")
+    require_workspace_member(db, user["id"], item.workspace_id)
+    if item.user_id not in {None, user["id"]}:
+        raise HTTPException(status_code=403, detail="Notification is not visible to current user.")
+    item.status = "read"
+    item.read_at = datetime.utcnow()
+    db.commit()
+    db.refresh(item)
+    return _notification_out(item)
+
+
+@router.post("/notifications/read-all")
+def read_all_notifications(workspace_id: int, db: Session = Depends(get_db), user=Depends(authenticate_user)):
+    require_workspace_member(db, user["id"], workspace_id)
+    rows = db.execute(
+        select(Notification).where(
+            Notification.workspace_id == workspace_id,
+            Notification.status == "unread",
+            or_(Notification.user_id.is_(None), Notification.user_id == user["id"]),
+        )
+    ).scalars().all()
+    now = datetime.utcnow()
+    for item in rows:
+        item.status = "read"
+        item.read_at = now
+    db.commit()
+    return {"ok": True, "count": len(rows)}
 
 
 @router.get("/templates", response_model=list[TemplateOut])

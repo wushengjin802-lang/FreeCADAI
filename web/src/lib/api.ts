@@ -11,11 +11,14 @@ import type {
   ConsoleInvite,
   ConsoleMeResponse,
   ConsoleMember,
+  ConsoleNotification,
   ConsolePluginGuide,
   ConsoleTaskActionResponse,
   ConsoleTaskDetail,
   ConsoleTaskListItem,
   ConsoleTaskSubmitResponse,
+  ConsoleUsageMemberItem,
+  ConsoleUsageProjectItem,
   ConsoleWorkspace,
   Health,
   LoginResponse,
@@ -192,7 +195,30 @@ export const consoleApi = {
   updateModelAsset: (token: string, id: number, body: Partial<Omit<ModelAsset, "id" | "workspace_id" | "created_at" | "updated_at">>) =>
     apiFetch<ModelAsset>(`/api/v1/console/model-assets/${id}`, token, { method: "PUT", body: JSON.stringify(body) }),
   deleteModelAsset: (token: string, id: number) =>
-    apiFetch<{ ok: boolean }>(`/api/v1/console/model-assets/${id}`, token, { method: "DELETE" })
+    apiFetch<{ ok: boolean }>(`/api/v1/console/model-assets/${id}`, token, { method: "DELETE" }),
+  usage: (token: string, workspaceId: number) =>
+    apiFetch<UsageSummary>(`/api/v1/console/usage${toQuery({ workspace_id: workspaceId })}`, token),
+  usageDaily: (token: string, workspaceId: number) =>
+    apiFetch<UsageDailyItem[]>(`/api/v1/console/usage/daily${toQuery({ workspace_id: workspaceId, days: 14 })}`, token),
+  usageByModel: (token: string, workspaceId: number) =>
+    apiFetch<UsageByModelItem[]>(`/api/v1/console/usage/by-model${toQuery({ workspace_id: workspaceId })}`, token),
+  usageByMember: (token: string, workspaceId: number) =>
+    apiFetch<ConsoleUsageMemberItem[]>(`/api/v1/console/usage/by-member${toQuery({ workspace_id: workspaceId })}`, token),
+  usageByProject: (token: string, workspaceId: number) =>
+    apiFetch<ConsoleUsageProjectItem[]>(`/api/v1/console/usage/by-project${toQuery({ workspace_id: workspaceId })}`, token),
+  billingPlans: (token: string) => apiFetch<BillingPlan[]>("/api/v1/console/billing/plans", token),
+  billingSummary: (token: string, workspaceId: number) =>
+    apiFetch<BillingSummary>(`/api/v1/console/billing/summary${toQuery({ workspace_id: workspaceId })}`, token),
+  createCheckout: (token: string, body: { workspace_id: number; plan: string }) =>
+    apiFetch<{ ok: boolean; provider: string; checkout_url?: string | null; message: string }>("/api/v1/console/billing/checkout", token, { method: "POST", body: JSON.stringify(body) }),
+  auditLogs: (token: string, workspaceId: number, action?: string) =>
+    apiFetch<AuditLog[]>(`/api/v1/console/audit-logs${toQuery({ workspace_id: workspaceId, limit: 100, action })}`, token),
+  notifications: (token: string, workspaceId: number, unreadOnly?: boolean) =>
+    apiFetch<ConsoleNotification[]>(`/api/v1/console/notifications${toQuery({ workspace_id: workspaceId, unread_only: unreadOnly })}`, token),
+  readNotification: (token: string, id: number) =>
+    apiFetch<ConsoleNotification>(`/api/v1/console/notifications/${id}/read`, token, { method: "POST" }),
+  readAllNotifications: (token: string, workspaceId: number) =>
+    apiFetch<{ ok: boolean; count: number }>(`/api/v1/console/notifications/read-all${toQuery({ workspace_id: workspaceId })}`, token, { method: "POST" })
 };
 
 export const adminApi = {

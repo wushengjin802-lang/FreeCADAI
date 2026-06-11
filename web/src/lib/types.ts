@@ -56,6 +56,26 @@ export type UsageByModelItem = {
   estimated_cost: number;
 };
 
+export type ConsoleUsageMemberItem = {
+  user_id?: number | null;
+  email: string;
+  display_name: string;
+  task_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  estimated_cost: number;
+};
+
+export type ConsoleUsageProjectItem = {
+  project_id: string;
+  task_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  estimated_cost: number;
+};
+
 export type BillingWorkspaceSummary = {
   workspace_id: number;
   workspace_name: string;
@@ -197,6 +217,19 @@ export type AuditLog = {
   target_id: string;
   workspace_id?: number | null;
   metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type ConsoleNotification = {
+  id: number;
+  workspace_id: number;
+  user_id?: number | null;
+  title: string;
+  body: string;
+  level: string;
+  status: string;
+  metadata: Record<string, unknown>;
+  read_at?: string | null;
   created_at: string;
 };
 

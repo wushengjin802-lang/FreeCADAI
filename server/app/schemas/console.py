@@ -186,3 +186,36 @@ class ConsoleTemplateOut(BaseModel):
     category: str
     prompt: str
     enabled: bool
+
+
+class ConsoleUsageMemberItem(BaseModel):
+    user_id: Optional[int] = None
+    email: str = ""
+    display_name: str = ""
+    task_count: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost: float = 0
+
+
+class ConsoleUsageProjectItem(BaseModel):
+    project_id: str = ""
+    task_count: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost: float = 0
+
+
+class ConsoleNotificationOut(BaseModel):
+    id: int
+    workspace_id: int
+    user_id: Optional[int] = None
+    title: str
+    body: str
+    level: str
+    status: str
+    metadata: Dict[str, Any]
+    read_at: Optional[str] = None
+    created_at: str

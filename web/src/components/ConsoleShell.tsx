@@ -3,7 +3,11 @@
 import {
   AppstoreOutlined,
   ApiOutlined,
+  AuditOutlined,
+  BarChartOutlined,
+  BellOutlined,
   CodeOutlined,
+  CreditCardOutlined,
   DatabaseOutlined,
   FileTextOutlined,
   KeyOutlined,
@@ -46,6 +50,14 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
 
   const selectedKey = pathname?.includes("/console/members")
     ? "members"
+    : pathname?.includes("/console/usage")
+      ? "usage"
+    : pathname?.includes("/console/billing")
+      ? "billing"
+    : pathname?.includes("/console/notifications")
+      ? "notifications"
+    : pathname?.includes("/console/audit")
+      ? "audit"
     : pathname?.includes("/console/assets/scripts")
       ? "scriptAssets"
     : pathname?.includes("/console/assets/models")
@@ -78,6 +90,10 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
             { key: "templates", icon: <AppstoreOutlined />, label: "模板中心", onClick: () => router.push(routePath("/console/templates")) },
             { key: "scriptAssets", icon: <CodeOutlined />, label: "脚本资产", onClick: () => router.push(routePath("/console/assets/scripts")) },
             { key: "modelAssets", icon: <DatabaseOutlined />, label: "模型资产", onClick: () => router.push(routePath("/console/assets/models")) },
+            { key: "usage", icon: <BarChartOutlined />, label: "用量看板", onClick: () => router.push(routePath("/console/usage")) },
+            { key: "billing", icon: <CreditCardOutlined />, label: "账单套餐", onClick: () => router.push(routePath("/console/billing")) },
+            { key: "notifications", icon: <BellOutlined />, label: "通知中心", onClick: () => router.push(routePath("/console/notifications")) },
+            { key: "audit", icon: <AuditOutlined />, label: "审计日志", onClick: () => router.push(routePath("/console/audit")) },
             { key: "plugin", icon: <ApiOutlined />, label: "插件接入", onClick: () => router.push(routePath("/console/plugin")) },
             { key: "apiKeys", icon: <KeyOutlined />, label: "API Key", onClick: () => router.push(routePath("/console/api-keys")) },
             { key: "members", icon: <TeamOutlined />, label: "成员管理", onClick: () => router.push(routePath("/console/members")) },

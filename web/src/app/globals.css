@@ -339,6 +339,27 @@ body {
   word-break: break-word;
 }
 
+.enterprise-usage-row {
+  display: grid;
+  grid-template-columns: 110px minmax(120px, 1fr) 190px;
+  align-items: center;
+  gap: 14px;
+}
+
+.enterprise-usage-member-table .ant-table,
+.enterprise-audit-table .ant-table {
+  min-width: 900px;
+}
+
+.enterprise-audit-table td:nth-child(5) {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.enterprise-plan-card {
+  min-height: 100%;
+}
+
 .enterprise-error-text {
   max-height: 260px;
   overflow: auto;

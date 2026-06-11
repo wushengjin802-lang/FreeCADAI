@@ -234,6 +234,21 @@ class UsageRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(128), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    level: Mapped[str] = mapped_column(String(32), nullable=False, default="info")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="unread")
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class AdminUser(Base):
     __tablename__ = "admin_users"
 
