@@ -23,6 +23,7 @@ import type {
   Health,
   LoginResponse,
   ModelAsset,
+  ModelUploadPrepareResponse,
   ScriptAsset,
   ScriptVersion,
   TaskDetail,
@@ -78,6 +79,24 @@ export async function apiFetch<T>(path: string, token: string, init: RequestInit
   });
   if (!response.ok) throw new Error(await parseError(response));
   return response.json() as Promise<T>;
+}
+
+async function apiFetchForm<T>(path: string, token: string, formData: FormData): Promise<T> {
+  const response = await fetch(appPath(path), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData
+  });
+  if (!response.ok) throw new Error(await parseError(response));
+  return response.json() as Promise<T>;
+}
+
+async function apiFetchBlob(path: string, token: string): Promise<Blob> {
+  const response = await fetch(appPath(path), {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) throw new Error(await parseError(response));
+  return response.blob();
 }
 
 export async function login(username: string, password: string) {
@@ -196,6 +215,14 @@ export const consoleApi = {
     apiFetch<ModelAsset>(`/api/v1/console/model-assets/${id}`, token, { method: "PUT", body: JSON.stringify(body) }),
   deleteModelAsset: (token: string, id: number) =>
     apiFetch<{ ok: boolean }>(`/api/v1/console/model-assets/${id}`, token, { method: "DELETE" }),
+  prepareModelUpload: (token: string, body: { workspace_id: number; file_name: string; size_bytes: number }) =>
+    apiFetch<ModelUploadPrepareResponse>("/api/v1/console/model-assets/upload-token", token, { method: "POST", body: JSON.stringify(body) }),
+  uploadModelAsset: (token: string, formData: FormData) =>
+    apiFetchForm<ModelAsset>("/api/v1/console/model-assets/upload", token, formData),
+  downloadModelAsset: (token: string, id: number) =>
+    apiFetchBlob(`/api/v1/console/model-assets/${id}/download`, token),
+  previewModelAsset: (token: string, id: number) =>
+    apiFetchBlob(`/api/v1/console/model-assets/${id}/preview`, token),
   usage: (token: string, workspaceId: number) =>
     apiFetch<UsageSummary>(`/api/v1/console/usage${toQuery({ workspace_id: workspaceId })}`, token),
   usageDaily: (token: string, workspaceId: number) =>

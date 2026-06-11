@@ -4,13 +4,13 @@ import secrets
 import time
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from server.app.db.session import get_db
 from server.app.models.entities import AdminSession, AdminUser, ApiKey, AuditLog, Template, User, UserSession, Workspace, WorkspaceMember
-from server.app.models.entities import GeneratedScript, GenerationTask
+from server.app.models.entities import GeneratedScript, GenerationTask, ModelAsset, ScriptAsset
 from server.app.schemas.plugin import (
     ExecutionReportRequest,
     ExecutionReportResponse,
@@ -36,6 +36,8 @@ from server.app.services.auth import authenticate_admin, authenticate_plugin, cr
 from server.app.services.billing import assert_workspace_quota, record_usage
 from server.app.services.default_templates import builtin_template_rows
 from server.app.services.llm_orchestrator import generate_script, regenerate_script, repair_script
+from server.app.services.assets import touch_asset
+from server.app.services.model_storage import assert_allowed_file, model_asset_path, storage_uri_for, write_upload_file
 from server.app.services.task_queue import enqueue_generation_task, load_generation_task_payload, retry_generation_task
 from server.app.services.task_store import create_task, mark_task_failed, mark_task_success, save_execution_report
 
@@ -387,6 +389,75 @@ def task_status(
 ):
     task = _require_workspace_task(db, workspace, task_id)
     return _status_payload(db, task)
+
+
+@router.post("/model-assets/upload")
+def upload_model_asset_from_plugin(
+    task_id: int | None = Form(None),
+    script_asset_id: int | None = Form(None),
+    project_id: str = Form(""),
+    name: str = Form(""),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    workspace=Depends(authenticate_plugin),
+):
+    ext = assert_allowed_file(file.filename or "")
+    task = None
+    if task_id:
+        task = _require_workspace_task(db, workspace, task_id)
+    if script_asset_id:
+        script_asset = db.get(ScriptAsset, script_asset_id)
+        if script_asset is None or script_asset.workspace_id != workspace.id:
+            raise HTTPException(status_code=404, detail="Script asset not found.")
+    item = ModelAsset(
+        workspace_id=workspace.id,
+        script_asset_id=script_asset_id,
+        task_id=task_id,
+        project_id=project_id or (task.project_id if task else ""),
+        name=(name or file.filename or "Plugin model asset")[:128],
+        file_name=file.filename or "model{}".format(ext),
+        file_type=ext.lstrip(".").upper(),
+        storage_uri="",
+        preview_uri="",
+        checksum="",
+        size_bytes=0,
+        status="active",
+        metadata_json={"uploaded_by": "plugin", "source": "plugin"},
+    )
+    db.add(item)
+    db.flush()
+    target = model_asset_path(workspace.id, item.id, item.file_name)
+    size_bytes, checksum = write_upload_file(file, target)
+    item.size_bytes = size_bytes
+    item.checksum = checksum
+    item.storage_uri = storage_uri_for(workspace.id, item.id, item.file_name)
+    item.preview_uri = "/api/v1/console/model-assets/{}/preview".format(item.id) if ext == ".stl" else ""
+    touch_asset(item)
+    db.add(
+        AuditLog(
+            actor="plugin",
+            action="plugin.model_asset.upload",
+            target_type="model_asset",
+            target_id=str(item.id),
+            workspace_id=workspace.id,
+            metadata_json={"file_name": item.file_name, "size_bytes": size_bytes, "task_id": task_id, "script_asset_id": script_asset_id},
+        )
+    )
+    db.commit()
+    db.refresh(item)
+    return {
+        "ok": True,
+        "asset_id": item.id,
+        "workspace_id": item.workspace_id,
+        "task_id": item.task_id,
+        "script_asset_id": item.script_asset_id,
+        "file_name": item.file_name,
+        "file_type": item.file_type,
+        "storage_uri": item.storage_uri,
+        "preview_uri": item.preview_uri,
+        "checksum": item.checksum,
+        "size_bytes": item.size_bytes,
+    }
 
 
 @router.post("/tasks/{task_id}/cancel", response_model=TaskActionResponse)

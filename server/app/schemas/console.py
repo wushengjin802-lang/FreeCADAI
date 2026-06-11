@@ -219,3 +219,17 @@ class ConsoleNotificationOut(BaseModel):
     metadata: Dict[str, Any]
     read_at: Optional[str] = None
     created_at: str
+
+
+class ConsoleModelUploadPrepareRequest(BaseModel):
+    workspace_id: int
+    file_name: str = Field(..., min_length=1, max_length=255)
+    size_bytes: int = Field(default=0, ge=0)
+
+
+class ConsoleModelUploadPrepareResponse(BaseModel):
+    upload_token: str
+    upload_url: str
+    max_size_bytes: int
+    allowed_extensions: list[str]
+    expires_in_minutes: int

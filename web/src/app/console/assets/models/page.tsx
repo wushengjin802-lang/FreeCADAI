@@ -1,13 +1,14 @@
 "use client";
 
-import { DatabaseOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
+import { DatabaseOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, PlusOutlined, UploadOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App as AntApp, Button, Card, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from "antd";
+import { Alert, App as AntApp, Button, Card, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, Upload } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ConsoleShell } from "@/components/ConsoleShell";
-import { consoleApi } from "@/lib/api";
+import { StlPreviewer } from "@/components/StlPreviewer";
+import { consoleApi, downloadBlob } from "@/lib/api";
 import { routePath } from "@/lib/routes";
 import { canManageWorkspace, useConsoleStore } from "@/lib/store";
 import type { ModelAsset } from "@/lib/types";
@@ -52,8 +53,12 @@ export default function ConsoleModelAssetsPage() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
   const [editing, setEditing] = useState<ModelAsset | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [previewAsset, setPreviewAsset] = useState<ModelAsset | null>(null);
   const [open, setOpen] = useState(false);
   const [form] = Form.useForm<ModelFormValues>();
+  const [uploadForm] = Form.useForm<ModelFormValues>();
 
   useEffect(() => {
     if (!token) router.replace(routePath("/console/login"));
@@ -77,11 +82,24 @@ export default function ConsoleModelAssetsPage() {
     [meQuery.data?.workspaces, workspaceId]
   );
   const canManage = canManageWorkspace(workspace?.role);
+  const canUpload = workspace?.role === "owner" || workspace?.role === "admin" || workspace?.role === "member";
 
   const assetsQuery = useQuery({
     queryKey: ["console-model-assets", token, workspace?.id, q, status],
     queryFn: () => consoleApi.modelAssets(token, { workspace_id: workspace?.id as number, q, status }),
     enabled: Boolean(token && workspace?.id)
+  });
+
+  const scriptsQuery = useQuery({
+    queryKey: ["console-script-assets", token, workspace?.id, "model-link"],
+    queryFn: () => consoleApi.scriptAssets(token, { workspace_id: workspace?.id as number, status: "active" }),
+    enabled: Boolean(token && workspace?.id)
+  });
+
+  const previewQuery = useQuery({
+    queryKey: ["console-model-preview", token, previewAsset?.id],
+    queryFn: () => consoleApi.previewModelAsset(token, previewAsset?.id as number),
+    enabled: Boolean(token && previewAsset?.id)
   });
 
   const createMutation = useMutation({
@@ -142,6 +160,39 @@ export default function ConsoleModelAssetsPage() {
     }
   });
 
+  const uploadMutation = useMutation({
+    mutationFn: async (values: ModelFormValues) => {
+      if (!uploadFile) throw new Error("请选择模型文件");
+      const prepared = await consoleApi.prepareModelUpload(token, {
+        workspace_id: workspace?.id as number,
+        file_name: uploadFile.name,
+        size_bytes: uploadFile.size
+      });
+      const formData = new FormData();
+      formData.set("workspace_id", String(workspace?.id));
+      formData.set("upload_token", prepared.upload_token);
+      formData.set("name", values.name || uploadFile.name);
+      formData.set("project_id", values.project_id || "");
+      if (values.script_asset_id) formData.set("script_asset_id", String(values.script_asset_id));
+      if (values.task_id) formData.set("task_id", String(values.task_id));
+      formData.set("file", uploadFile);
+      return consoleApi.uploadModelAsset(token, formData);
+    },
+    onSuccess: () => {
+      message.success("模型文件已上传");
+      setUploadOpen(false);
+      setUploadFile(null);
+      uploadForm.resetFields();
+      queryClient.invalidateQueries({ queryKey: ["console-model-assets"] });
+      queryClient.invalidateQueries({ queryKey: ["console-me"] });
+    }
+  });
+
+  const downloadMutation = useMutation({
+    mutationFn: (row: ModelAsset) => consoleApi.downloadModelAsset(token, row.id).then((blob) => downloadBlob(row.file_name || `${row.name}.model`, blob)),
+    onSuccess: () => message.success("模型文件已开始下载")
+  });
+
   function openCreate() {
     setEditing(null);
     form.setFieldsValue({ name: "", project_id: "", file_name: "", file_type: "FCStd", storage_uri: "", preview_uri: "", checksum: "", size_bytes: 0, status: "active" });
@@ -166,6 +217,12 @@ export default function ConsoleModelAssetsPage() {
     setOpen(true);
   }
 
+  function openUpload() {
+    setUploadFile(null);
+    uploadForm.setFieldsValue({ name: "", project_id: "", script_asset_id: null, task_id: null, status: "active" });
+    setUploadOpen(true);
+  }
+
   const columns: ColumnsType<ModelAsset> = [
     {
       title: "模型资产",
@@ -184,10 +241,16 @@ export default function ConsoleModelAssetsPage() {
     { title: "更新时间", dataIndex: "updated_at", width: 180 },
     {
       title: "操作",
-      width: 190,
+      width: 330,
       align: "right",
       render: (_, row) => (
         <Space>
+          <Button size="small" icon={<DownloadOutlined />} disabled={!row.storage_uri} onClick={() => downloadMutation.mutate(row)}>
+            下载
+          </Button>
+          <Button size="small" icon={<EyeOutlined />} disabled={!row.preview_uri || row.file_type.toLowerCase() !== "stl"} onClick={() => setPreviewAsset(row)}>
+            预览
+          </Button>
           <Button size="small" icon={<EditOutlined />} disabled={!canManage} onClick={() => openEdit(row)}>
             编辑
           </Button>
@@ -209,19 +272,27 @@ export default function ConsoleModelAssetsPage() {
             <Title level={3}>
               <DatabaseOutlined /> 模型资产
             </Title>
-            <Text className="muted">维护企业工作区的 FreeCAD 模型文件、预览地址和关联任务。</Text>
+            <Text className="muted">上传 FCStd/STEP/STL 等模型文件，下载归档，并在 Web 端预览 STL。</Text>
           </div>
-          <Button type="primary" icon={<PlusOutlined />} disabled={!canManage} onClick={openCreate}>
-            新建模型资产
-          </Button>
+          <Space wrap>
+            <Button icon={<PlusOutlined />} disabled={!canManage} onClick={openCreate}>
+              登记元数据
+            </Button>
+            <Button type="primary" icon={<UploadOutlined />} disabled={!canUpload} onClick={openUpload}>
+              上传模型
+            </Button>
+          </Space>
         </section>
 
-        {!canManage ? <Alert type="info" showIcon message="当前角色可以查看模型资产，新增、编辑和删除需要 Owner/Admin 权限。" /> : null}
+        {!canUpload ? <Alert type="info" showIcon message="当前角色可以查看和下载模型资产，上传需要 Member 及以上权限。" /> : null}
+        {workspace?.role === "member" ? <Alert type="info" showIcon message="Member 可以上传模型文件；编辑和删除资产元数据需要 Owner/Admin 权限。" /> : null}
         {meQuery.error ? <Alert type="error" showIcon message={(meQuery.error as Error).message} /> : null}
         {assetsQuery.error ? <Alert type="error" showIcon message={(assetsQuery.error as Error).message} /> : null}
         {createMutation.error ? <Alert type="error" showIcon message={(createMutation.error as Error).message} /> : null}
         {updateMutation.error ? <Alert type="error" showIcon message={(updateMutation.error as Error).message} /> : null}
         {deleteMutation.error ? <Alert type="error" showIcon message={(deleteMutation.error as Error).message} /> : null}
+        {uploadMutation.error ? <Alert type="error" showIcon message={(uploadMutation.error as Error).message} /> : null}
+        {downloadMutation.error ? <Alert type="error" showIcon message={(downloadMutation.error as Error).message} /> : null}
 
         <Card className="console-card">
           <Space wrap style={{ marginBottom: 16 }}>
@@ -242,10 +313,49 @@ export default function ConsoleModelAssetsPage() {
             dataSource={assetsQuery.data || []}
             loading={assetsQuery.isLoading}
             pagination={false}
-            scroll={{ x: 1240 }}
+            scroll={{ x: 1380 }}
           />
         </Card>
       </Space>
+
+      <Modal title="上传模型文件" open={uploadOpen} onCancel={() => setUploadOpen(false)} footer={null} destroyOnHidden>
+        <Form form={uploadForm} layout="vertical" onFinish={(values) => uploadMutation.mutate(values)}>
+          <Form.Item label="文件" required>
+            <Upload
+              maxCount={1}
+              beforeUpload={(file) => {
+                setUploadFile(file);
+                if (!uploadForm.getFieldValue("name")) uploadForm.setFieldValue("name", file.name);
+                return false;
+              }}
+              onRemove={() => setUploadFile(null)}
+            >
+              <Button icon={<UploadOutlined />}>选择 FCStd / STEP / STL / OBJ</Button>
+            </Upload>
+            <Text className="muted">STL 文件上传后可直接 Web 预览，其他格式支持归档和下载。</Text>
+          </Form.Item>
+          <Form.Item name="name" label="资产名称" rules={[{ required: true, message: "请输入资产名称" }]}>
+            <Input maxLength={128} />
+          </Form.Item>
+          <Form.Item name="project_id" label="项目 ID">
+            <Input maxLength={128} />
+          </Form.Item>
+          <Form.Item name="script_asset_id" label="关联脚本资产">
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              options={(scriptsQuery.data || []).map((item) => ({ value: item.id, label: `#${item.id} ${item.name}` }))}
+            />
+          </Form.Item>
+          <Form.Item name="task_id" label="关联任务 ID">
+            <InputNumber min={1} className="full-width" />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" loading={uploadMutation.isPending} block>
+            上传
+          </Button>
+        </Form>
+      </Modal>
 
       <Modal title={editing ? "编辑模型资产" : "新建模型资产"} open={open} onCancel={() => setOpen(false)} footer={null} destroyOnHidden>
         <Form form={form} layout="vertical" onFinish={(values) => (editing ? updateMutation.mutate(values) : createMutation.mutate(values))}>
@@ -281,6 +391,20 @@ export default function ConsoleModelAssetsPage() {
           </Button>
         </Form>
       </Modal>
+
+      <Drawer title={previewAsset?.name || "模型预览"} open={Boolean(previewAsset)} width={900} onClose={() => setPreviewAsset(null)} destroyOnHidden>
+        <Space direction="vertical" size={14} className="full-width">
+          {previewAsset ? (
+            <Space wrap>
+              <Tag color="blue">{previewAsset.file_type}</Tag>
+              <Text>{previewAsset.file_name}</Text>
+              <Text className="muted">{bytesText(previewAsset.size_bytes)}</Text>
+            </Space>
+          ) : null}
+          {previewQuery.error ? <Alert type="error" showIcon message={(previewQuery.error as Error).message} /> : null}
+          <StlPreviewer blob={previewQuery.data || null} />
+        </Space>
+      </Drawer>
     </ConsoleShell>
   );
 }

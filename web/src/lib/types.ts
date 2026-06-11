@@ -190,6 +190,14 @@ export type ModelAsset = {
   updated_at: string;
 };
 
+export type ModelUploadPrepareResponse = {
+  upload_token: string;
+  upload_url: string;
+  max_size_bytes: number;
+  allowed_extensions: string[];
+  expires_in_minutes: number;
+};
+
 export type ApiKey = {
   id: number;
   workspace_id: number;

@@ -330,7 +330,7 @@ body {
 }
 
 .enterprise-model-asset-table .ant-table {
-  min-width: 1240px;
+  min-width: 1380px;
 }
 
 .enterprise-model-asset-table td:nth-child(1),
@@ -358,6 +358,14 @@ body {
 
 .enterprise-plan-card {
   min-height: 100%;
+}
+
+.stl-preview-canvas {
+  width: 100%;
+  display: block;
+  border: 1px solid var(--console-line);
+  border-radius: 8px;
+  background: #f7faf6;
 }
 
 .enterprise-error-text {

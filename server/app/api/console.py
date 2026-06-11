@@ -3,10 +3,12 @@
 import secrets
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
+from server.app.core.config import settings
 from server.app.db.session import get_db
 from server.app.models.entities import (
     ApiKey,
@@ -47,6 +49,8 @@ from server.app.schemas.console import (
     ConsoleTaskSubmitResponse,
     ConsoleTemplateOut,
     ConsoleNotificationOut,
+    ConsoleModelUploadPrepareRequest,
+    ConsoleModelUploadPrepareResponse,
     ConsoleUsageMemberItem,
     ConsoleUsageProjectItem,
     ConsoleUserOut,
@@ -85,6 +89,18 @@ from server.app.services.auth import (
     verify_password,
 )
 from server.app.services.assets import copy_script_asset, current_script_version, touch_asset
+from server.app.services.model_storage import (
+    allowed_extensions,
+    assert_allowed_file,
+    delete_asset_files,
+    max_upload_bytes,
+    model_asset_path,
+    resolve_storage_uri,
+    sign_upload_token,
+    storage_uri_for,
+    verify_upload_token,
+    write_upload_file,
+)
 from server.app.services.billing import quota_summary
 from server.app.services.billing import assert_workspace_quota
 from server.app.services.billing import billing_plans
@@ -1387,9 +1403,80 @@ def list_model_assets(
     return [_model_asset_out(row) for row in rows]
 
 
+def _validate_model_links(db: Session, workspace_id: int, script_asset_id: int | None, task_id: int | None):
+    if script_asset_id:
+        script_asset = db.get(ScriptAsset, script_asset_id)
+        if script_asset is None or script_asset.workspace_id != workspace_id:
+            raise HTTPException(status_code=404, detail="Script asset not found in this workspace.")
+    if task_id:
+        task = db.get(GenerationTask, task_id)
+        if task is None or task.workspace_id != workspace_id:
+            raise HTTPException(status_code=404, detail="Task not found in this workspace.")
+
+
+@router.post("/model-assets/upload-token", response_model=ConsoleModelUploadPrepareResponse)
+def prepare_model_upload(payload: ConsoleModelUploadPrepareRequest, db: Session = Depends(get_db), user=Depends(authenticate_user)):
+    require_workspace_member(db, user["id"], payload.workspace_id, CONSOLE_TASK_ROLES)
+    assert_allowed_file(payload.file_name, payload.size_bytes or None)
+    return ConsoleModelUploadPrepareResponse(
+        upload_token=sign_upload_token(payload.workspace_id, payload.file_name, payload.size_bytes),
+        upload_url="/api/v1/console/model-assets/upload",
+        max_size_bytes=max_upload_bytes(),
+        allowed_extensions=allowed_extensions(),
+        expires_in_minutes=settings.model_asset_upload_token_minutes,
+    )
+
+
+@router.post("/model-assets/upload", response_model=ModelAssetOut)
+def upload_model_asset(
+    workspace_id: int = Form(...),
+    upload_token: str = Form(...),
+    name: str = Form(""),
+    project_id: str = Form(""),
+    script_asset_id: int | None = Form(None),
+    task_id: int | None = Form(None),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user=Depends(authenticate_user),
+):
+    require_workspace_member(db, user["id"], workspace_id, CONSOLE_TASK_ROLES)
+    verify_upload_token(upload_token, workspace_id, file.filename or "")
+    ext = assert_allowed_file(file.filename or "")
+    _validate_model_links(db, workspace_id, script_asset_id, task_id)
+    item = ModelAsset(
+        workspace_id=workspace_id,
+        script_asset_id=script_asset_id,
+        task_id=task_id,
+        project_id=project_id,
+        name=(name or file.filename or "Model asset")[:128],
+        file_name=file.filename or "model{}".format(ext),
+        file_type=ext.lstrip(".").upper(),
+        storage_uri="",
+        preview_uri="",
+        checksum="",
+        size_bytes=0,
+        status="active",
+        metadata_json={"uploaded_by": "user:{}".format(user["id"]), "source": "console"},
+    )
+    db.add(item)
+    db.flush()
+    target = model_asset_path(workspace_id, item.id, item.file_name)
+    size_bytes, checksum = write_upload_file(file, target)
+    item.size_bytes = size_bytes
+    item.checksum = checksum
+    item.storage_uri = storage_uri_for(workspace_id, item.id, item.file_name)
+    item.preview_uri = "/api/v1/console/model-assets/{}/preview".format(item.id) if ext == ".stl" else ""
+    touch_asset(item)
+    _audit(db, "console.model_asset.upload", "model_asset", item.id, workspace_id, {"file_name": item.file_name, "size_bytes": size_bytes})
+    db.commit()
+    db.refresh(item)
+    return _model_asset_out(item)
+
+
 @router.post("/model-assets", response_model=ModelAssetOut)
 def create_model_asset(payload: ModelAssetCreate, db: Session = Depends(get_db), user=Depends(authenticate_user)):
     require_workspace_member(db, user["id"], payload.workspace_id, CONSOLE_WRITE_ROLES)
+    _validate_model_links(db, payload.workspace_id, payload.script_asset_id, payload.task_id)
     item = ModelAsset(
         workspace_id=payload.workspace_id,
         script_asset_id=payload.script_asset_id,
@@ -1421,6 +1508,12 @@ def update_model_asset(asset_id: int, payload: ModelAssetUpdate, db: Session = D
     _workspace, member = require_workspace_member(db, user["id"], item.workspace_id)
     if not _can_manage_asset(db, user["id"], member, item):
         raise HTTPException(status_code=403, detail="Only workspace admins or the creator can update this asset.")
+    _validate_model_links(
+        db,
+        item.workspace_id,
+        payload.script_asset_id if payload.script_asset_id is not None else item.script_asset_id,
+        payload.task_id if payload.task_id is not None else item.task_id,
+    )
     for field in ("script_asset_id", "task_id", "project_id", "name", "file_name", "file_type", "storage_uri", "preview_uri", "checksum", "size_bytes", "status"):
         value = getattr(payload, field)
         if value is not None:
@@ -1442,9 +1535,35 @@ def delete_model_asset(asset_id: int, db: Session = Depends(get_db), user=Depend
     require_workspace_member(db, user["id"], item.workspace_id, CONSOLE_WRITE_ROLES)
     workspace_id = item.workspace_id
     db.delete(item)
+    delete_asset_files(workspace_id, asset_id)
     _audit(db, "console.model_asset.delete", "model_asset", asset_id, workspace_id, {})
     db.commit()
     return {"ok": True}
+
+
+@router.get("/model-assets/{asset_id}/download")
+def download_model_asset(asset_id: int, db: Session = Depends(get_db), user=Depends(authenticate_user)):
+    item = db.get(ModelAsset, asset_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Model asset not found.")
+    require_workspace_member(db, user["id"], item.workspace_id)
+    path = resolve_storage_uri(item.storage_uri)
+    _audit(db, "console.model_asset.download", "model_asset", item.id, item.workspace_id, {"file_name": item.file_name})
+    db.commit()
+    return FileResponse(path, filename=item.file_name, media_type="application/octet-stream")
+
+
+@router.get("/model-assets/{asset_id}/preview")
+def preview_model_asset(asset_id: int, db: Session = Depends(get_db), user=Depends(authenticate_user)):
+    item = db.get(ModelAsset, asset_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Model asset not found.")
+    require_workspace_member(db, user["id"], item.workspace_id)
+    path = resolve_storage_uri(item.storage_uri)
+    ext = path.suffix.lower()
+    if ext != ".stl":
+        raise HTTPException(status_code=422, detail="This model type has no web preview resource.")
+    return FileResponse(path, filename=item.file_name, media_type="model/stl")
 
 
 @router.get("/api-keys", response_model=list[ConsoleApiKeyOut])

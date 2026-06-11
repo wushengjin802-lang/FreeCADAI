@@ -30,6 +30,10 @@ class Settings:
     admin_session_hours = int(os.getenv("FREECADAI_ADMIN_SESSION_HOURS", "12"))
     user_session_hours = int(os.getenv("FREECADAI_USER_SESSION_HOURS", "168"))
     auto_migrate = os.getenv("FREECADAI_AUTO_MIGRATE", "1").lower() in {"1", "true", "yes", "on"}
+    model_asset_storage_dir = os.getenv("FREECADAI_MODEL_ASSET_STORAGE_DIR", "server/app/static/model_assets")
+    model_asset_max_upload_mb = int(os.getenv("FREECADAI_MODEL_ASSET_MAX_UPLOAD_MB", "100"))
+    model_asset_upload_token_minutes = int(os.getenv("FREECADAI_MODEL_ASSET_UPLOAD_TOKEN_MINUTES", "30"))
+    model_asset_allowed_extensions = os.getenv("FREECADAI_MODEL_ASSET_ALLOWED_EXTENSIONS", ".fcstd,.step,.stp,.stl,.obj").lower()
 
     @property
     def llm_provider(self) -> str:
