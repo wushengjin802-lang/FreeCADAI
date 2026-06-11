@@ -9,10 +9,23 @@ from server.app.models.entities import ExecutionReport, GeneratedScript, Generat
 from server.app.services.assets import create_script_asset_from_task
 
 
-def create_task(db: Session, workspace: Workspace, action, prompt, context, modeling_mode, project_id, status="running"):
+def create_task(
+    db: Session,
+    workspace: Workspace,
+    action,
+    prompt,
+    context,
+    modeling_mode,
+    project_id,
+    status="running",
+    source="plugin",
+    created_by_user_id=None,
+):
     task = GenerationTask(
         workspace_id=workspace.id,
+        created_by_user_id=created_by_user_id,
         project_id=project_id or "",
+        source=source,
         action=action,
         modeling_mode=modeling_mode,
         prompt=prompt,

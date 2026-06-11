@@ -8,6 +8,7 @@ import {
   FileTextOutlined,
   KeyOutlined,
   LogoutOutlined,
+  PlusOutlined,
   ReloadOutlined,
   TeamOutlined,
   UserOutlined
@@ -101,6 +102,41 @@ function formatShanghaiTime(value?: string | null) {
 function formatLimit(value?: number | null) {
   return value == null ? "不限" : String(value);
 }
+
+const planOptions = [
+  { value: "free", label: "免费版" },
+  { value: "pro", label: "专业版" },
+  { value: "team", label: "团队版" },
+  { value: "enterprise", label: "企业版" }
+];
+
+const statusOptions = [
+  { value: "active", label: "正常" },
+  { value: "suspended", label: "停用" }
+];
+
+const statusLabel: Record<string, string> = {
+  active: "正常",
+  suspended: "停用",
+  succeeded: "成功",
+  failed: "失败",
+  running: "运行中",
+  queued: "排队中",
+  canceled: "已取消",
+  revoked: "已撤销"
+};
+
+const adminRoleOptions = [
+  { value: "operator", label: "操作员" },
+  { value: "owner", label: "拥有者" },
+  { value: "viewer", label: "观察者" }
+];
+
+const adminRoleLabel: Record<string, string> = {
+  owner: "拥有者",
+  operator: "操作员",
+  viewer: "观察者"
+};
 
 function useConsoleData() {
   const token = useAppStore((state) => state.token);
@@ -340,8 +376,11 @@ function WorkspacesView({ workspaces, role }: { workspaces: Workspace[]; role?: 
   const columns: ColumnsType<Workspace> = [
     { title: "ID", dataIndex: "id", width: 80 },
     { title: "名称", dataIndex: "name" },
-    { title: "套餐", dataIndex: "plan", width: 120 },
-    { title: "状态", dataIndex: "status", width: 120, render: (status) => <Tag color={statusColor(status)}>{status}</Tag> },
+    { title: "套餐", dataIndex: "plan", width: 120, render: (plan) => {
+      const planLabel: Record<string, string> = { free: "免费版", pro: "专业版", team: "团队版", enterprise: "企业版" };
+      return <Tag>{planLabel[plan] || plan}</Tag>;
+    } },
+    { title: "状态", dataIndex: "status", width: 120, render: (status) => <Tag color={statusColor(status)}>{statusLabel[status] || status}</Tag> },
     { title: "Key 数", dataIndex: "api_key_count", width: 100 },
     { title: "任务数", dataIndex: "task_count", width: 100 },
     {
@@ -383,8 +422,8 @@ function WorkspacesView({ workspaces, role }: { workspaces: Workspace[]; role?: 
       <Card title="创建工作区" className="console-card">
         <Form form={form} layout="inline" onFinish={(values) => createMutation.mutate(values)} initialValues={{ plan: "free", status: "active" }}>
           <Form.Item name="name" rules={[{ required: true, message: "请输入名称" }]}><Input placeholder="工作区名称" /></Form.Item>
-          <Form.Item name="plan"><Select style={{ width: 130 }} options={["free", "pro", "team", "enterprise"].map((value) => ({ value }))} /></Form.Item>
-          <Form.Item name="status"><Select style={{ width: 140 }} options={["active", "suspended"].map((value) => ({ value }))} /></Form.Item>
+          <Form.Item name="plan"><Select style={{ width: 130 }} options={planOptions} /></Form.Item>
+          <Form.Item name="status"><Select style={{ width: 140 }} options={statusOptions} /></Form.Item>
           <Button type="primary" htmlType="submit" disabled={!canWrite} loading={createMutation.isPending}>创建</Button>
         </Form>
       </Card>
@@ -411,10 +450,10 @@ function WorkspacesView({ workspaces, role }: { workspaces: Workspace[]; role?: 
             <Input />
           </Form.Item>
           <Form.Item name="plan" label="套餐">
-            <Select options={["free", "pro", "team", "enterprise"].map((value) => ({ value }))} />
+            <Select options={planOptions} />
           </Form.Item>
           <Form.Item name="status" label="状态">
-            <Select options={["active", "suspended"].map((value) => ({ value }))} />
+            <Select options={statusOptions} />
           </Form.Item>
         </Form>
       </Modal>
@@ -441,7 +480,7 @@ function TasksView({ role }: { role?: string }) {
   const columns: ColumnsType<TaskListItem> = [
     { title: "ID", dataIndex: "id", width: 80 },
     { title: "工作区", dataIndex: "workspace_id", width: 90 },
-    { title: "状态", dataIndex: "status", width: 110, render: (status) => <Tag color={statusColor(status)}>{status}</Tag> },
+    { title: "状态", dataIndex: "status", width: 110, render: (status) => <Tag color={statusColor(status)}>{statusLabel[status] || status}</Tag> },
     { title: "动作", dataIndex: "action", width: 110 },
     { title: "模式", dataIndex: "modeling_mode", width: 130 },
     { title: "模型", dataIndex: "model", width: 160 },
@@ -592,7 +631,7 @@ function AssetsView({ role }: { role?: string }) {
     { title: "文件名", dataIndex: "file_name", width: 220, ellipsis: true },
     { title: "类型", dataIndex: "file_type", width: 100, render: (value) => value || "-" },
     { title: "脚本资产", dataIndex: "script_asset_id", width: 110, render: (value) => value || "-" },
-    { title: "状态", dataIndex: "status", width: 100, render: (value) => <Tag color={statusColor(value)}>{value}</Tag> },
+    { title: "状态", dataIndex: "status", width: 100, render: (value) => <Tag color={statusColor(value)}>{statusLabel[value] || value}</Tag> },
     { title: "预览地址", dataIndex: "preview_uri", ellipsis: true, render: (value) => value || "-" },
     { title: "更新时间", dataIndex: "updated_at", width: 180, render: (value) => formatShanghaiTime(value) },
     {
@@ -714,6 +753,8 @@ function TemplatesView({ role }: { role?: string }) {
   const { message, modal } = AntApp.useApp();
   const [form] = Form.useForm();
   const [importText, setImportText] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const canWrite = canOperate(role);
   const templates = useQuery({ queryKey: ["templates", token, workspaceId], queryFn: () => adminApi.templates(token, workspaceId), enabled: Boolean(token) });
 
@@ -724,6 +765,7 @@ function TemplatesView({ role }: { role?: string }) {
     onSuccess: () => {
       message.success("模板已保存");
       form.resetFields();
+      setCreateOpen(false);
       invalidate();
     }
   });
@@ -746,6 +788,7 @@ function TemplatesView({ role }: { role?: string }) {
       adminApi.importTemplates(token, scopedRows).then(() => {
         message.success("模板已导入");
         setImportText("");
+        setImportOpen(false);
         invalidate();
       }).catch((error: Error) => message.error(error.message));
     } catch {
@@ -774,25 +817,17 @@ function TemplatesView({ role }: { role?: string }) {
 
   return (
     <Space direction="vertical" size={16} className="full-width">
-      <Card title="新增模板" className="console-card">
-        <Form form={form} layout="vertical" initialValues={{ category: "通用", enabled: true }} onFinish={(values) => createMutation.mutate(values)}>
-          <Row gutter={12}>
-            <Col xs={24} md={10}><Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col xs={24} md={8}><Form.Item name="category" label="分类"><Select options={templateCategoryOptions} /></Form.Item></Col>
-            <Col xs={24} md={6}><Form.Item name="enabled" label="启用" valuePropName="checked"><Switch /></Form.Item></Col>
-          </Row>
-          <Form.Item name="prompt" label="Prompt" rules={[{ required: true }]}><Input.TextArea rows={4} /></Form.Item>
-          <Button type="primary" htmlType="submit" disabled={!canWrite} loading={createMutation.isPending}>保存模板</Button>
-        </Form>
-      </Card>
-      <Card title="模板导入" className="console-card" extra={<Button type="primary" disabled={!canWrite} onClick={importTemplates}>导入 JSON</Button>}>
-        <Input.TextArea rows={4} value={importText} onChange={(event) => setImportText(event.target.value)} placeholder='{"templates":[{"name":"...","category":"通用","prompt":"...","enabled":true}]}' />
-      </Card>
       <Card
         title="模板列表"
         className="console-card"
         extra={(
           <Space>
+            <Button type="primary" icon={<PlusOutlined />} disabled={!canWrite} onClick={() => setCreateOpen(true)}>
+              新增模板
+            </Button>
+            <Button disabled={!canWrite} onClick={() => setImportOpen(true)}>
+              模板导入
+            </Button>
             <Button disabled={!canWrite} loading={seedMutation.isPending} onClick={() => seedMutation.mutate()}>导入内置模板</Button>
             <Button onClick={() => adminApi.exportTemplates(token, workspaceId).then((rows) => downloadJson("freecadai_templates.json", { templates: rows }))}>导出 JSON</Button>
           </Space>
@@ -800,6 +835,25 @@ function TemplatesView({ role }: { role?: string }) {
       >
         <Table rowKey="id" className="template-table balanced-table" columns={columns} dataSource={templates.data || []} loading={templates.isLoading} scroll={{ x: 1260 }} tableLayout="fixed" pagination={{ pageSize: 10 }} />
       </Card>
+
+      <Modal title="新增模板" open={createOpen} onCancel={() => setCreateOpen(false)} footer={null} destroyOnClose>
+        <Form form={form} layout="vertical" initialValues={{ category: "通用", enabled: true }} onFinish={(values) => createMutation.mutate(values)}>
+          <Row gutter={12}>
+            <Col xs={24} md={10}><Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item></Col>
+            <Col xs={24} md={8}><Form.Item name="category" label="分类"><Select options={templateCategoryOptions} /></Form.Item></Col>
+            <Col xs={24} md={6}><Form.Item name="enabled" label="启用" valuePropName="checked"><Switch /></Form.Item></Col>
+          </Row>
+          <Form.Item name="prompt" label="Prompt" rules={[{ required: true }]}><Input.TextArea rows={4} /></Form.Item>
+          <Button type="primary" htmlType="submit" disabled={!canWrite} loading={createMutation.isPending} block>保存模板</Button>
+        </Form>
+      </Modal>
+
+      <Modal title="模板导入" open={importOpen} onCancel={() => { setImportOpen(false); setImportText(""); }} footer={null} destroyOnClose>
+        <Space direction="vertical" size={12} className="full-width">
+          <Input.TextArea rows={6} value={importText} onChange={(event) => setImportText(event.target.value)} placeholder='{"templates":[{"name":"...","category":"通用","prompt":"...","enabled":true}]}' />
+          <Button type="primary" disabled={!canWrite || !importText.trim()} onClick={importTemplates} block>导入 JSON</Button>
+        </Space>
+      </Modal>
     </Space>
   );
 }
@@ -842,7 +896,7 @@ function KeysView({ role, workspaces }: { role?: string; workspaces: Workspace[]
     },
     { title: "名称", dataIndex: "name" },
     { title: "前缀", dataIndex: "prefix", width: 140 },
-    { title: "状态", dataIndex: "status", width: 110, render: (status) => <Tag color={statusColor(status)}>{status}</Tag> },
+    { title: "状态", dataIndex: "status", width: 110, render: (status) => <Tag color={statusColor(status)}>{statusLabel[status] || status}</Tag> },
     { title: "最近使用", dataIndex: "last_used_at", width: 170, render: (value) => formatShanghaiTime(value) },
     { title: "创建时间", dataIndex: "created_at", width: 180, render: (value) => formatShanghaiTime(value) },
     {
@@ -894,11 +948,12 @@ function AdminUsersView({ role }: { role?: string }) {
   });
   const updateMutation = useMutation({ mutationFn: ({ id, body }: { id: number; body: Partial<{ role: string; status: string; password: string }> }) => adminApi.updateAdminUser(token, id, body), onSuccess: invalidate });
 
+
   const columns: ColumnsType<AdminUser> = [
     { title: "ID", dataIndex: "id", width: 80 },
     { title: "用户名", dataIndex: "username" },
-    { title: "角色", dataIndex: "role", width: 120 },
-    { title: "状态", dataIndex: "status", width: 110, render: (status) => <Tag color={statusColor(status)}>{status}</Tag> },
+    { title: "角色", dataIndex: "role", width: 120, render: (role) => <Tag>{adminRoleLabel[role] || role}</Tag> },
+    { title: "状态", dataIndex: "status", width: 110, render: (status) => <Tag color={statusColor(status)}>{statusLabel[status] || status}</Tag> },
     { title: "最近登录", dataIndex: "last_login_at", width: 170, render: (value) => formatShanghaiTime(value) },
     { title: "创建时间", dataIndex: "created_at", width: 180, render: (value) => formatShanghaiTime(value) },
     {
@@ -922,8 +977,8 @@ function AdminUsersView({ role }: { role?: string }) {
         <Form form={createForm} layout="inline" initialValues={{ role: "operator", status: "active" }} onFinish={(values) => createMutation.mutate(values)}>
           <Form.Item name="username" rules={[{ required: true }]}><Input placeholder="用户名" /></Form.Item>
           <Form.Item name="password" rules={[{ required: true, min: 8 }]}><Input.Password placeholder="初始密码" /></Form.Item>
-          <Form.Item name="role"><Select style={{ width: 130 }} options={["operator", "owner", "viewer"].map((value) => ({ value }))} /></Form.Item>
-          <Form.Item name="status"><Select style={{ width: 130 }} options={["active", "suspended"].map((value) => ({ value }))} /></Form.Item>
+          <Form.Item name="role"><Select style={{ width: 130 }} options={adminRoleOptions} /></Form.Item>
+          <Form.Item name="status"><Select style={{ width: 130 }} options={statusOptions} /></Form.Item>
           <Button type="primary" htmlType="submit" disabled={!canWrite} loading={createMutation.isPending}>创建</Button>
         </Form>
       </Card>

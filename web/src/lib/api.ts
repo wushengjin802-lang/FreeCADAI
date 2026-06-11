@@ -12,6 +12,10 @@ import type {
   ConsoleMeResponse,
   ConsoleMember,
   ConsolePluginGuide,
+  ConsoleTaskActionResponse,
+  ConsoleTaskDetail,
+  ConsoleTaskListItem,
+  ConsoleTaskSubmitResponse,
   ConsoleWorkspace,
   Health,
   LoginResponse,
@@ -141,7 +145,20 @@ export const consoleApi = {
   rotateApiKey: (token: string, id: number) =>
     apiFetch<ConsoleApiKeyCreateResponse>(`/api/v1/console/api-keys/${id}/rotate`, token, { method: "POST" }),
   pluginGuide: (token: string, workspaceId: number) =>
-    apiFetch<ConsolePluginGuide>(`/api/v1/console/plugin/connection-guide${toQuery({ workspace_id: workspaceId })}`, token)
+    apiFetch<ConsolePluginGuide>(`/api/v1/console/plugin/connection-guide${toQuery({ workspace_id: workspaceId })}`, token),
+  tasks: (
+    token: string,
+    params: { workspace_id: number; limit?: number; offset?: number; q?: string; status?: string; action?: string; modeling_mode?: string; mine?: boolean }
+  ) => apiFetch<ConsoleTaskListItem[]>(`/api/v1/console/tasks${toQuery({ limit: 50, offset: 0, ...params })}`, token),
+  createTask: (token: string, body: { workspace_id: number; prompt: string; context?: string; modeling_mode?: string; project_id?: string; template_id?: number | null }) =>
+    apiFetch<ConsoleTaskSubmitResponse>("/api/v1/console/tasks", token, { method: "POST", body: JSON.stringify(body) }),
+  taskDetail: (token: string, id: number) => apiFetch<ConsoleTaskDetail>(`/api/v1/console/tasks/${id}`, token),
+  cancelTask: (token: string, id: number) =>
+    apiFetch<ConsoleTaskActionResponse>(`/api/v1/console/tasks/${id}/cancel`, token, { method: "POST" }),
+  retryTask: (token: string, id: number) =>
+    apiFetch<ConsoleTaskActionResponse>(`/api/v1/console/tasks/${id}/retry`, token, { method: "POST" }),
+  templates: (token: string, workspaceId: number) =>
+    apiFetch<Template[]>(`/api/v1/console/templates${toQuery({ workspace_id: workspaceId })}`, token)
 };
 
 export const adminApi = {

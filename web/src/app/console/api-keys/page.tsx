@@ -20,6 +20,13 @@ function statusColor(status: string) {
   return "default";
 }
 
+const apiKeyStatusLabel: Record<string, string> = {
+  active: "正常",
+  disabled: "已禁用",
+  expired: "已过期",
+  revoked: "已撤销"
+};
+
 export default function ConsoleApiKeysPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -101,7 +108,7 @@ export default function ConsoleApiKeysPage() {
   const columns: ColumnsType<ApiKey> = [
     { title: "名称", dataIndex: "name", render: (value, row) => <Space direction="vertical" size={0}><Text strong>{value}</Text><Text className="muted">{row.scopes?.join(", ") || "plugin"}</Text></Space> },
     { title: "前缀", dataIndex: "prefix", width: 160, render: (value) => <Text code>{value}</Text> },
-    { title: "状态", dataIndex: "status", width: 120, render: (status) => <Tag color={statusColor(status)}>{status}</Tag> },
+    { title: "状态", dataIndex: "status", width: 120, render: (status) => <Tag color={statusColor(status)}>{apiKeyStatusLabel[status] || status}</Tag> },
     { title: "过期时间", dataIndex: "expires_at", width: 190, render: (value) => value || "长期" },
     { title: "最后使用", dataIndex: "last_used_at", width: 190, render: (value) => value || "-" },
     {
@@ -144,7 +151,7 @@ export default function ConsoleApiKeysPage() {
           </Button>
         </section>
 
-        {!canManage ? <Alert type="info" showIcon message="当前角色只能查看 API Key，创建和轮换需要 Owner/Admin 权限。" /> : null}
+        {!canManage ? <Alert type="info" showIcon message="当前角色只能查看 API Key，创建和轮换需要 拥有者/管理员 权限。" /> : null}
         {meQuery.error ? <Alert type="error" showIcon message={(meQuery.error as Error).message} /> : null}
         {keysQuery.error ? <Alert type="error" showIcon message={(keysQuery.error as Error).message} /> : null}
         {createMutation.error ? <Alert type="error" showIcon message={(createMutation.error as Error).message} /> : null}

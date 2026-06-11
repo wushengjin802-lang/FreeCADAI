@@ -3,6 +3,7 @@
 import {
   AppstoreOutlined,
   ApiOutlined,
+  FileTextOutlined,
   KeyOutlined,
   LogoutOutlined,
   SettingOutlined,
@@ -43,6 +44,8 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
 
   const selectedKey = pathname?.includes("/console/members")
     ? "members"
+    : pathname?.includes("/console/tasks")
+      ? "tasks"
     : pathname?.includes("/console/plugin")
       ? "plugin"
       : pathname?.includes("/console/api-keys")
@@ -63,6 +66,7 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
           selectedKeys={[selectedKey]}
           items={[
             { key: "overview", icon: <AppstoreOutlined />, label: "工作区概览", onClick: () => router.push(routePath("/console")) },
+            { key: "tasks", icon: <FileTextOutlined />, label: "任务中心", onClick: () => router.push(routePath("/console/tasks")) },
             { key: "plugin", icon: <ApiOutlined />, label: "插件接入", onClick: () => router.push(routePath("/console/plugin")) },
             { key: "apiKeys", icon: <KeyOutlined />, label: "API Key", onClick: () => router.push(routePath("/console/api-keys")) },
             { key: "members", icon: <TeamOutlined />, label: "成员管理", onClick: () => router.push(routePath("/console/members")) },

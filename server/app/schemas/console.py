@@ -132,3 +132,57 @@ class ConsolePluginGuideOut(BaseModel):
     verify_path: str = "/api/v1/plugin/auth/verify"
     login_path: str = "/api/v1/plugin/account/login"
     bind_path: str = "/api/v1/plugin/account/bind-workspace"
+
+
+class ConsoleTaskCreate(BaseModel):
+    workspace_id: int
+    prompt: str = Field(..., min_length=1)
+    context: str = ""
+    modeling_mode: str = "3d_solid"
+    project_id: str = ""
+    template_id: Optional[int] = None
+
+
+class ConsoleTaskListItem(BaseModel):
+    id: int
+    workspace_id: int
+    created_by_user_id: Optional[int] = None
+    project_id: str
+    source: str
+    action: str
+    modeling_mode: str
+    prompt: str
+    model: str
+    status: str
+    error_message: str = ""
+    latency_ms: int
+    created_at: str
+    updated_at: str
+
+
+class ConsoleTaskSubmitResponse(BaseModel):
+    task_id: int
+    status: str
+    message: str
+
+
+class ConsoleTaskDetail(BaseModel):
+    task: Dict[str, Any]
+    scripts: list[Dict[str, Any]]
+    reports: list[Dict[str, Any]]
+
+
+class ConsoleTaskActionResponse(BaseModel):
+    ok: bool
+    task_id: int
+    status: str
+    message: str = ""
+
+
+class ConsoleTemplateOut(BaseModel):
+    id: int
+    workspace_id: Optional[int] = None
+    name: str
+    category: str
+    prompt: str
+    enabled: bool

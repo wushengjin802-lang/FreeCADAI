@@ -2,7 +2,7 @@ FROM node:24-alpine AS deps
 
 WORKDIR /app
 COPY web/package.json web/package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN npm config set registry https://registry.npmmirror.com && npm ci --no-audit --no-fund
 
 FROM node:24-alpine AS builder
 
@@ -22,7 +22,13 @@ RUN npm run build
 FROM node:24-alpine AS runner
 
 WORKDIR /app
+ARG NEXT_PUBLIC_ASSET_PREFIX=
+ARG NEXT_PUBLIC_API_PREFIX=
+ARG NEXT_PUBLIC_ROUTE_PREFIX=
 ENV NODE_ENV=production
+ENV NEXT_PUBLIC_ASSET_PREFIX=${NEXT_PUBLIC_ASSET_PREFIX}
+ENV NEXT_PUBLIC_API_PREFIX=${NEXT_PUBLIC_API_PREFIX}
+ENV NEXT_PUBLIC_ROUTE_PREFIX=${NEXT_PUBLIC_ROUTE_PREFIX}
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/package-lock.json ./package-lock.json
 COPY --from=builder /app/.next ./.next
@@ -31,4 +37,4 @@ COPY --from=builder /app/next.config.mjs ./next.config.mjs
 COPY --from=builder /app/node_modules ./node_modules
 
 EXPOSE 3000
-CMD ["npx", "next", "start", "--hostname", "0.0.0.0", "--port", "3000"]
+CMD ["npm", "run", "start", "--", "--hostname", "0.0.0.0", "--port", "3000"]

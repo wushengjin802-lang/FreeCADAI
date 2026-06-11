@@ -34,12 +34,30 @@ body {
 .console-sider {
   background: var(--console-rail) !important;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
+  height: 100vh !important;
+  position: sticky !important;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+}
+
+.console-sider .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.console-sider .ant-menu {
+  flex: 1;
+  overflow-y: auto;
+  height: 0;
 }
 
 .console-brand {
   padding: 22px 18px 18px;
   color: #f2f7f0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
 }
 
 .console-brand strong {
@@ -138,14 +156,31 @@ body {
   min-height: 100vh;
 }
 
+.enterprise-shell .ant-layout {
+  /* 内层 Layout 在内容少时也要撑满高度 */
+  min-height: 100vh;
+}
+
 .enterprise-sider {
   background: #22312d !important;
+  height: 100vh !important;
+  position: sticky !important;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+}
+
+.enterprise-sider .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .enterprise-brand {
   padding: 22px 18px 18px;
   color: #f4f7f1;
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
 }
 
 .enterprise-brand strong {
@@ -163,6 +198,10 @@ body {
 
 .enterprise-menu {
   background: transparent !important;
+  flex: 1;
+  overflow-y: auto;
+  /* 让菜单滚动时不影响品牌区域 */
+  height: 0; /* flex 子项 min-height 兜底，确保 flex: 1 生效 */
 }
 
 .enterprise-header {
@@ -249,6 +288,27 @@ body {
 
 .enterprise-api-key-table td:nth-child(6) .ant-space {
   justify-content: flex-end;
+}
+
+.enterprise-tasks-table .ant-table {
+  min-width: 1100px;
+}
+
+.enterprise-tasks-table td:nth-child(1) {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.enterprise-tasks-table td:nth-child(6) .ant-space {
+  justify-content: flex-end;
+}
+
+.enterprise-error-text {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .muted {

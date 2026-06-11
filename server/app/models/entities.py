@@ -113,6 +113,7 @@ class GenerationTask(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     workspace_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     project_id: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="plugin")
     action: Mapped[str] = mapped_column(String(32), nullable=False, default="generate")

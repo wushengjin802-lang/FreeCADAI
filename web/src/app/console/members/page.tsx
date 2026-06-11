@@ -15,10 +15,32 @@ import type { ConsoleInvite, ConsoleMember } from "@/lib/types";
 const { Text, Title } = Typography;
 
 const roleOptions = [
-  { value: "admin", label: "Admin" },
-  { value: "member", label: "Member" },
-  { value: "viewer", label: "Viewer" }
+  { value: "admin", label: "管理员" },
+  { value: "member", label: "成员" },
+  { value: "viewer", label: "观察者" }
 ];
+
+const memberStatusLabel: Record<string, string> = {
+  active: "正常",
+  pending: "待接受",
+  invited: "已邀请"
+};
+
+function memberStatusColor(status: string) {
+  if (status === "active") return "green";
+  return "gold";
+}
+
+const roleLabel: Record<string, string> = {
+  owner: "拥有者",
+  admin: "管理员",
+  member: "成员",
+  viewer: "观察者"
+};
+
+function roleLabelText(role: string) {
+  return roleLabel[role] || role;
+}
 
 function roleColor(role: string) {
   if (role === "owner") return "green";
@@ -100,8 +122,8 @@ export default function ConsoleMembersPage() {
 
   const columns: ColumnsType<ConsoleMember> = [
     { title: "成员", dataIndex: "display_name", render: (_, row) => <Space direction="vertical" size={0}><Text strong>{row.display_name || row.email}</Text><Text className="muted">{row.email}</Text></Space> },
-    { title: "角色", dataIndex: "role", width: 140, render: (role) => <Tag color={roleColor(role)}>{role}</Tag> },
-    { title: "状态", dataIndex: "status", width: 120, render: (status) => <Tag color={status === "active" ? "green" : "red"}>{status}</Tag> },
+    { title: "角色", dataIndex: "role", width: 140, render: (role) => <Tag color={roleColor(role)}>{roleLabelText(role)}</Tag> },
+    { title: "状态", dataIndex: "status", width: 120, render: (status) => <Tag color={memberStatusColor(status)}>{memberStatusLabel[status] || status}</Tag> },
     { title: "加入时间", dataIndex: "joined_at", width: 190, render: (value) => value || "-" },
     {
       title: "操作",
@@ -141,7 +163,7 @@ export default function ConsoleMembersPage() {
             <Title level={3}>
               <TeamOutlined /> 成员管理
             </Title>
-            <Text className="muted">Owner/Admin 可以邀请成员、调整角色和移除成员。</Text>
+            <Text className="muted">拥有者/管理员 可以邀请成员、调整角色和移除成员。</Text>
           </div>
           <Button type="primary" icon={<PlusOutlined />} disabled={!canManage} onClick={() => setInviteOpen(true)}>
             邀请成员

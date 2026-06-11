@@ -3,17 +3,20 @@
 import secrets
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from server.app.db.session import get_db
 from server.app.models.entities import (
     ApiKey,
     AuditLog,
+    ExecutionReport,
+    GeneratedScript,
     GenerationTask,
     ModelAsset,
     ScriptAsset,
+    Template,
     User,
     UserSession,
     Workspace,
@@ -34,6 +37,12 @@ from server.app.schemas.console import (
     ConsolePasswordChange,
     ConsolePluginGuideOut,
     ConsoleRegisterRequest,
+    ConsoleTaskActionResponse,
+    ConsoleTaskCreate,
+    ConsoleTaskDetail,
+    ConsoleTaskListItem,
+    ConsoleTaskSubmitResponse,
+    ConsoleTemplateOut,
     ConsoleUserOut,
     ConsoleWorkspaceOut,
     ConsoleWorkspaceUpdate,
@@ -49,6 +58,8 @@ from server.app.services.auth import (
 )
 from server.app.services.billing import quota_summary
 from server.app.services.billing import assert_workspace_quota
+from server.app.services.task_queue import enqueue_generation_task, load_generation_task_payload, retry_generation_task
+from server.app.services.task_store import create_task
 
 
 auth_router = APIRouter(prefix="/api/v1/console/auth", tags=["console-auth"])
@@ -58,6 +69,7 @@ public_router = APIRouter(prefix="/api/v1/console", tags=["console-public"])
 
 CONSOLE_WRITE_ROLES = {"owner", "admin"}
 CONSOLE_OWNER_ROLES = {"owner"}
+CONSOLE_TASK_ROLES = {"owner", "admin", "member"}
 MEMBER_ROLES = {"owner", "admin", "member", "viewer"}
 
 
@@ -147,6 +159,36 @@ def _api_key_out(row: ApiKey):
         expires_at=row.expires_at.isoformat(timespec="seconds") if row.expires_at else None,
         last_used_at=row.last_used_at.isoformat(timespec="seconds") if row.last_used_at else None,
         created_at=row.created_at.isoformat(timespec="seconds"),
+    )
+
+
+def _task_out(row: GenerationTask):
+    return ConsoleTaskListItem(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        created_by_user_id=row.created_by_user_id,
+        project_id=row.project_id,
+        source=row.source,
+        action=row.action,
+        modeling_mode=row.modeling_mode,
+        prompt=row.prompt,
+        model=row.model,
+        status=row.status,
+        error_message=row.error_message,
+        latency_ms=row.latency_ms,
+        created_at=row.created_at.isoformat(timespec="seconds"),
+        updated_at=row.updated_at.isoformat(timespec="seconds"),
+    )
+
+
+def _template_out(row: Template):
+    return ConsoleTemplateOut(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        name=row.name,
+        category=row.category,
+        prompt=row.prompt,
+        enabled=row.enabled,
     )
 
 
@@ -439,6 +481,172 @@ def remove_member(workspace_id: int, member_id: int, db: Session = Depends(get_d
     _audit(db, "console.member.remove", "workspace_member", item.id, workspace_id, {"user_id": item.user_id})
     db.commit()
     return {"ok": True}
+
+
+@router.get("/tasks", response_model=list[ConsoleTaskListItem])
+def list_tasks(
+    workspace_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(authenticate_user),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    status: str = "",
+    action: str = "",
+    modeling_mode: str = "",
+    q: str = "",
+    mine: bool = False,
+):
+    require_workspace_member(db, user["id"], workspace_id)
+    stmt = select(GenerationTask).where(GenerationTask.workspace_id == workspace_id)
+    if mine:
+        stmt = stmt.where(GenerationTask.created_by_user_id == user["id"])
+    if status:
+        stmt = stmt.where(GenerationTask.status == status)
+    if action:
+        stmt = stmt.where(GenerationTask.action == action)
+    if modeling_mode:
+        stmt = stmt.where(GenerationTask.modeling_mode == modeling_mode)
+    if q:
+        like = "%{}%".format(q.strip())
+        stmt = stmt.where(
+            or_(
+                GenerationTask.prompt.ilike(like),
+                GenerationTask.project_id.ilike(like),
+                GenerationTask.model.ilike(like),
+                GenerationTask.error_message.ilike(like),
+            )
+        )
+    rows = db.execute(stmt.order_by(desc(GenerationTask.id)).offset(offset).limit(limit)).scalars().all()
+    return [_task_out(row) for row in rows]
+
+
+@router.post("/tasks", response_model=ConsoleTaskSubmitResponse)
+def submit_task(payload: ConsoleTaskCreate, db: Session = Depends(get_db), user=Depends(authenticate_user)):
+    workspace, _member = require_workspace_member(db, user["id"], payload.workspace_id, CONSOLE_TASK_ROLES)
+    assert_workspace_quota(db, workspace, "tasks")
+    assert_workspace_quota(db, workspace, "concurrent")
+    context = payload.context or ""
+    if payload.template_id is not None:
+        template = db.get(Template, payload.template_id)
+        if template is None or not template.enabled or (template.workspace_id not in {None, workspace.id}):
+            raise HTTPException(status_code=404, detail="Template not found.")
+        context = "{}\n\nTemplate: {}\n{}".format(context, template.name, template.prompt).strip()
+    task = create_task(
+        db,
+        workspace,
+        "generate",
+        payload.prompt,
+        context,
+        payload.modeling_mode,
+        payload.project_id,
+        status="queued",
+        source="console",
+        created_by_user_id=user["id"],
+    )
+    queue_payload = {
+        "action": "generate",
+        "prompt": payload.prompt,
+        "context": context,
+        "modeling_mode": payload.modeling_mode,
+        "project_id": payload.project_id,
+        "created_by_user_id": user["id"],
+        "source": "console",
+    }
+    enqueue_generation_task(task.id, queue_payload)
+    _audit(db, "console.task.submit", "task", task.id, workspace.id, {"modeling_mode": payload.modeling_mode, "project_id": payload.project_id})
+    db.commit()
+    return ConsoleTaskSubmitResponse(task_id=task.id, status=task.status, message="Task has been queued.")
+
+
+@router.get("/tasks/{task_id}", response_model=ConsoleTaskDetail)
+def task_detail(task_id: int, db: Session = Depends(get_db), user=Depends(authenticate_user)):
+    task = db.get(GenerationTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    require_workspace_member(db, user["id"], task.workspace_id)
+    scripts = db.execute(select(GeneratedScript).where(GeneratedScript.task_id == task_id)).scalars().all()
+    reports = db.execute(select(ExecutionReport).where(ExecutionReport.task_id == task_id)).scalars().all()
+    return ConsoleTaskDetail(
+        task=_task_out(task).model_dump() | {"context_snapshot": task.context_snapshot},
+        scripts=[
+            {
+                "id": item.id,
+                "asset_id": item.asset_id,
+                "version_id": item.version_id,
+                "summary": item.summary,
+                "parameters": item.parameters_json,
+                "expected_objects": item.expected_objects_json,
+                "validation_status": item.validation_status,
+                "validation_error": item.validation_error,
+                "script": item.script,
+                "created_at": item.created_at.isoformat(timespec="seconds"),
+            }
+            for item in scripts
+        ],
+        reports=[
+            {
+                "id": item.id,
+                "status": item.status,
+                "plugin_version": item.plugin_version,
+                "freecad_version": item.freecad_version,
+                "document_name": item.document_name,
+                "object_count": item.object_count,
+                "new_objects": item.new_objects_json,
+                "error_trace": item.error_trace,
+                "created_at": item.created_at.isoformat(timespec="seconds"),
+            }
+            for item in reports
+        ],
+    )
+
+
+@router.post("/tasks/{task_id}/cancel", response_model=ConsoleTaskActionResponse)
+def cancel_task(task_id: int, db: Session = Depends(get_db), user=Depends(authenticate_user)):
+    task = db.get(GenerationTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    require_workspace_member(db, user["id"], task.workspace_id, CONSOLE_TASK_ROLES)
+    if task.status not in {"queued", "running"}:
+        return ConsoleTaskActionResponse(ok=False, task_id=task.id, status=task.status, message="Task cannot be canceled in its current status.")
+    task.status = "canceled"
+    task.error_message = "User canceled task."
+    _audit(db, "console.task.cancel", "task", task.id, task.workspace_id, {"status": task.status})
+    db.commit()
+    return ConsoleTaskActionResponse(ok=True, task_id=task.id, status=task.status, message="Task canceled.")
+
+
+@router.post("/tasks/{task_id}/retry", response_model=ConsoleTaskActionResponse)
+def retry_task(task_id: int, db: Session = Depends(get_db), user=Depends(authenticate_user)):
+    task = db.get(GenerationTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    workspace, _member = require_workspace_member(db, user["id"], task.workspace_id, CONSOLE_TASK_ROLES)
+    if task.status not in {"failed", "canceled"}:
+        return ConsoleTaskActionResponse(ok=False, task_id=task.id, status=task.status, message="Only failed or canceled tasks can be retried.")
+    if load_generation_task_payload(task.id) is None:
+        raise HTTPException(status_code=409, detail="Queued task payload is missing.")
+    assert_workspace_quota(db, workspace, "tasks")
+    assert_workspace_quota(db, workspace, "concurrent")
+    task.status = "queued"
+    task.error_message = ""
+    _audit(db, "console.task.retry", "task", task.id, task.workspace_id, {})
+    db.commit()
+    retry_generation_task(task.id)
+    return ConsoleTaskActionResponse(ok=True, task_id=task.id, status=task.status, message="Task queued again.")
+
+
+@router.get("/templates", response_model=list[ConsoleTemplateOut])
+def list_templates(workspace_id: int, db: Session = Depends(get_db), user=Depends(authenticate_user)):
+    require_workspace_member(db, user["id"], workspace_id)
+    rows = db.execute(
+        select(Template)
+        .where(
+            Template.enabled.is_(True),
+            or_(Template.workspace_id.is_(None), Template.workspace_id == workspace_id),
+        )
+        .order_by(Template.category, Template.name)
+    ).scalars().all()
+    return [_template_out(row) for row in rows]
 
 
 @router.get("/api-keys", response_model=list[ConsoleApiKeyOut])

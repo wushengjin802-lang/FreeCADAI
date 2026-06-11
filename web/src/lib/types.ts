@@ -290,3 +290,39 @@ export type ConsolePluginGuide = {
   login_path: string;
   bind_path: string;
 };
+
+export type ConsoleTaskListItem = {
+  id: number;
+  workspace_id: number;
+  created_by_user_id?: number | null;
+  project_id: string;
+  source: string;
+  action: string;
+  modeling_mode: string;
+  prompt: string;
+  model: string;
+  status: string;
+  error_message: string;
+  latency_ms: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ConsoleTaskSubmitResponse = {
+  task_id: number;
+  status: string;
+  message: string;
+};
+
+export type ConsoleTaskDetail = {
+  task: Record<string, unknown>;
+  scripts: Array<Record<string, unknown>>;
+  reports: Array<Record<string, unknown>>;
+};
+
+export type ConsoleTaskActionResponse = {
+  ok: boolean;
+  task_id: number;
+  status: string;
+  message: string;
+};

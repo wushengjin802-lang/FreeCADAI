@@ -84,7 +84,7 @@ export default function ConsolePluginPage() {
                   {
                     title: "选择工作区并绑定",
                     icon: <KeyOutlined />,
-                    description: "Owner/Admin 可生成插件 API Key；Member/Viewer 只能使用已绑定配置。"
+                    description: "拥有者/管理员 可生成插件 API Key；成员/观察者 只能使用已绑定配置。"
                   },
                   {
                     title: "检查连接",

@@ -1,0 +1,13 @@
+.git
+.venv
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+__pycache__
+**/__pycache__
+*.pyc
+.deploy-freecadai.zip
+docs
