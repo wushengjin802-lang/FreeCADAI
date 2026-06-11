@@ -7,10 +7,19 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { ConsoleShell } from "@/components/ConsoleShell";
 import { consoleApi } from "@/lib/api";
+import { formatShanghaiTime } from "@/lib/format";
 import { routePath } from "@/lib/routes";
 import { useConsoleStore } from "@/lib/store";
 
 const { Paragraph, Text, Title } = Typography;
+
+const taskStatusLabel: Record<string, string> = {
+  queued: "排队中",
+  running: "生成中",
+  succeeded: "已成功",
+  failed: "已失败",
+  canceled: "已取消"
+};
 
 function statusColor(status?: string) {
   if (status === "succeeded") return "green";
@@ -88,7 +97,7 @@ export default function ConsoleTaskDetailPage() {
           <div>
             <Title level={3}>任务 #{taskId}</Title>
             <Space>
-              {status ? <Tag color={statusColor(status)}>{status}</Tag> : null}
+              {status ? <Tag color={statusColor(status)}>{taskStatusLabel[status] || status}</Tag> : null}
               <Text className="muted">{String(task.model || "")}</Text>
             </Space>
           </div>
@@ -113,13 +122,13 @@ export default function ConsoleTaskDetailPage() {
         <Card className="console-card" loading={detailQuery.isLoading}>
           <Descriptions column={{ xs: 1, md: 2 }} bordered>
             <Descriptions.Item label="工作区">{String(task.workspace_id || "-")}</Descriptions.Item>
-            <Descriptions.Item label="项目">{String(task.project_id || "-")}</Descriptions.Item>
+            <Descriptions.Item label="项目名称">{String(task.project_id || "-")}</Descriptions.Item>
             <Descriptions.Item label="来源">{String(task.source || "-")}</Descriptions.Item>
             <Descriptions.Item label="动作">{String(task.action || "-")}</Descriptions.Item>
             <Descriptions.Item label="模式">{String(task.modeling_mode || "-")}</Descriptions.Item>
             <Descriptions.Item label="耗时">{task.latency_ms ? `${task.latency_ms} ms` : "-"}</Descriptions.Item>
-            <Descriptions.Item label="创建时间">{String(task.created_at || "-")}</Descriptions.Item>
-            <Descriptions.Item label="更新时间">{String(task.updated_at || "-")}</Descriptions.Item>
+            <Descriptions.Item label="创建时间">{formatShanghaiTime(String(task.created_at || ""))}</Descriptions.Item>
+            <Descriptions.Item label="更新时间">{formatShanghaiTime(String(task.updated_at || ""))}</Descriptions.Item>
           </Descriptions>
         </Card>
 

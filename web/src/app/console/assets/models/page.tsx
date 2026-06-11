@@ -9,11 +9,18 @@ import { useEffect, useMemo, useState } from "react";
 import { ConsoleShell } from "@/components/ConsoleShell";
 import { StlPreviewer } from "@/components/StlPreviewer";
 import { consoleApi, downloadBlob } from "@/lib/api";
+import { formatShanghaiTime } from "@/lib/format";
 import { routePath } from "@/lib/routes";
 import { canManageWorkspace, useConsoleStore } from "@/lib/store";
 import type { ModelAsset } from "@/lib/types";
 
 const { Paragraph, Text, Title } = Typography;
+
+const assetStatusLabel: Record<string, string> = {
+  active: "正常",
+  archived: "已归档",
+  disabled: "已停用"
+};
 
 type ModelFormValues = {
   name: string;
@@ -234,11 +241,11 @@ export default function ConsoleModelAssetsPage() {
         </Space>
       )
     },
-    { title: "项目", dataIndex: "project_id", width: 150, render: (value) => value || "-" },
-    { title: "状态", dataIndex: "status", width: 110, render: (value) => <Tag color={statusColor(value)}>{value}</Tag> },
+    { title: "项目名称", dataIndex: "project_id", width: 150, render: (value) => value || "-" },
+    { title: "状态", dataIndex: "status", width: 110, render: (value) => <Tag color={statusColor(value)}>{assetStatusLabel[value] || value}</Tag> },
     { title: "大小", dataIndex: "size_bytes", width: 110, render: bytesText },
     { title: "存储 URI", dataIndex: "storage_uri", render: (value) => <Paragraph ellipsis={{ rows: 2 }} style={{ margin: 0 }}>{value || "-"}</Paragraph> },
-    { title: "更新时间", dataIndex: "updated_at", width: 180 },
+    { title: "更新时间", dataIndex: "updated_at", width: 180, render: (value) => formatShanghaiTime(value) },
     {
       title: "操作",
       width: 330,
@@ -284,8 +291,8 @@ export default function ConsoleModelAssetsPage() {
           </Space>
         </section>
 
-        {!canUpload ? <Alert type="info" showIcon message="当前角色可以查看和下载模型资产，上传需要 Member 及以上权限。" /> : null}
-        {workspace?.role === "member" ? <Alert type="info" showIcon message="Member 可以上传模型文件；编辑和删除资产元数据需要 Owner/Admin 权限。" /> : null}
+        {!canUpload ? <Alert type="info" showIcon message="当前角色可以查看和下载模型资产，上传需要成员及以上权限。" /> : null}
+        {workspace?.role === "member" ? <Alert type="info" showIcon message="成员可以上传模型文件；编辑和删除资产元数据需要拥有者/管理员权限。" /> : null}
         {meQuery.error ? <Alert type="error" showIcon message={(meQuery.error as Error).message} /> : null}
         {assetsQuery.error ? <Alert type="error" showIcon message={(assetsQuery.error as Error).message} /> : null}
         {createMutation.error ? <Alert type="error" showIcon message={(createMutation.error as Error).message} /> : null}
@@ -303,7 +310,7 @@ export default function ConsoleModelAssetsPage() {
               style={{ width: 150 }}
               value={status || undefined}
               onChange={(value) => setStatus(value || "")}
-              options={["active", "archived"].map((item) => ({ value: item, label: item }))}
+              options={["active", "archived"].map((item) => ({ value: item, label: assetStatusLabel[item] || item }))}
             />
           </Space>
           <Table
@@ -337,7 +344,7 @@ export default function ConsoleModelAssetsPage() {
           <Form.Item name="name" label="资产名称" rules={[{ required: true, message: "请输入资产名称" }]}>
             <Input maxLength={128} />
           </Form.Item>
-          <Form.Item name="project_id" label="项目 ID">
+          <Form.Item name="project_id" label="项目名称">
             <Input maxLength={128} />
           </Form.Item>
           <Form.Item name="script_asset_id" label="关联脚本资产">
@@ -362,7 +369,7 @@ export default function ConsoleModelAssetsPage() {
           <Form.Item name="name" label="名称" rules={[{ required: true, message: "请输入名称" }]}>
             <Input maxLength={128} />
           </Form.Item>
-          <Form.Item name="project_id" label="项目 ID">
+          <Form.Item name="project_id" label="项目名称">
             <Input maxLength={128} />
           </Form.Item>
           <Form.Item name="file_name" label="文件名">
@@ -384,7 +391,7 @@ export default function ConsoleModelAssetsPage() {
             <InputNumber min={0} className="full-width" addonAfter="bytes" />
           </Form.Item>
           <Form.Item name="status" label="状态">
-            <Select options={["active", "archived"].map((item) => ({ value: item, label: item }))} />
+            <Select options={["active", "archived"].map((item) => ({ value: item, label: assetStatusLabel[item] || item }))} />
           </Form.Item>
           <Button type="primary" htmlType="submit" loading={createMutation.isPending || updateMutation.isPending} block>
             保存

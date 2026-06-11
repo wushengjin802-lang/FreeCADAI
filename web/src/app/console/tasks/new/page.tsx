@@ -83,7 +83,7 @@ export default function ConsoleNewTaskPage() {
           </Button>
         </section>
 
-        {!canSubmit ? <Alert type="info" showIcon message="当前角色不能新建任务，请联系工作区 Owner/Admin。" /> : null}
+        {!canSubmit ? <Alert type="info" showIcon message="当前角色不能新建任务，请联系工作区拥有者/管理员。" /> : null}
         {meQuery.error ? <Alert type="error" showIcon message={(meQuery.error as Error).message} /> : null}
         {templatesQuery.error ? <Alert type="error" showIcon message={(templatesQuery.error as Error).message} /> : null}
         {createMutation.error ? <Alert type="error" showIcon message={(createMutation.error as Error).message} /> : null}
@@ -102,7 +102,7 @@ export default function ConsoleNewTaskPage() {
               <Form.Item name="modeling_mode" label="建模模式" rules={[{ required: true, message: "请选择建模模式" }]} style={{ minWidth: 220 }}>
                 <Select options={modelingModes} />
               </Form.Item>
-              <Form.Item name="project_id" label="项目 ID" style={{ minWidth: 260 }}>
+              <Form.Item name="project_id" label="项目名称" style={{ minWidth: 260 }}>
                 <Input placeholder="可选，例如 demo-flange" />
               </Form.Item>
               <Form.Item name="template_id" label="模板" style={{ minWidth: 280 }}>

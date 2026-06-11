@@ -8,11 +8,32 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ConsoleShell } from "@/components/ConsoleShell";
 import { consoleApi } from "@/lib/api";
+import { formatShanghaiTime } from "@/lib/format";
 import { routePath } from "@/lib/routes";
 import { canManageWorkspace, useConsoleStore } from "@/lib/store";
 import type { ScriptAsset, ScriptVersion } from "@/lib/types";
 
 const { Paragraph, Text, Title } = Typography;
+
+const assetStatusLabel: Record<string, string> = {
+  active: "正常",
+  archived: "已归档",
+  disabled: "已停用"
+};
+
+const assetSourceLabel: Record<string, string> = {
+  generation: "生成",
+  copy: "副本",
+  upload: "上传",
+  manual: "手动"
+};
+
+const validationStatusLabel: Record<string, string> = {
+  passed: "通过",
+  failed: "失败",
+  pending: "待校验",
+  skipped: "未校验"
+};
 
 function statusColor(status: string) {
   if (status === "active") return "green";
@@ -142,9 +163,9 @@ export default function ConsoleScriptAssetsPage() {
   const versionColumns: ColumnsType<ScriptVersion> = [
     { title: "版本", dataIndex: "version", width: 90, render: (value, row) => <Tag color={row.id === selected?.current_version_id ? "green" : "blue"}>v{value}</Tag> },
     { title: "摘要", dataIndex: "summary", render: (value) => <Paragraph ellipsis={{ rows: 2 }} style={{ margin: 0 }}>{value || "-"}</Paragraph> },
-    { title: "校验", dataIndex: "validation_status", width: 110 },
+    { title: "校验", dataIndex: "validation_status", width: 110, render: (value) => <Tag color={value === "passed" ? "green" : value === "failed" ? "red" : "gold"}>{validationStatusLabel[value] || value}</Tag> },
     { title: "创建人", dataIndex: "created_by", width: 130 },
-    { title: "时间", dataIndex: "created_at", width: 180 },
+    { title: "时间", dataIndex: "created_at", width: 180, render: (value) => formatShanghaiTime(value) },
     {
       title: "操作",
       width: 170,
@@ -175,10 +196,10 @@ export default function ConsoleScriptAssetsPage() {
         </Space>
       )
     },
-    { title: "来源", dataIndex: "source", width: 120 },
-    { title: "状态", dataIndex: "status", width: 110, render: (value) => <Tag color={statusColor(value)}>{value}</Tag> },
+    { title: "来源", dataIndex: "source", width: 120, render: (value) => assetSourceLabel[value] || value },
+    { title: "状态", dataIndex: "status", width: 110, render: (value) => <Tag color={statusColor(value)}>{assetStatusLabel[value] || value}</Tag> },
     { title: "摘要", dataIndex: "summary", render: (value) => <Paragraph ellipsis={{ rows: 2 }} style={{ margin: 0 }}>{value || "-"}</Paragraph> },
-    { title: "更新时间", dataIndex: "updated_at", width: 180 },
+    { title: "更新时间", dataIndex: "updated_at", width: 180, render: (value) => formatShanghaiTime(value) },
     {
       title: "操作",
       width: 360,
@@ -216,7 +237,7 @@ export default function ConsoleScriptAssetsPage() {
           </div>
         </section>
 
-        {workspace?.role === "viewer" ? <Alert type="info" showIcon message="Viewer 可以查看资产，复用、收藏和复制需要 Member 及以上角色。" /> : null}
+        {workspace?.role === "viewer" ? <Alert type="info" showIcon message="观察者可以查看资产，复用、收藏和复制需要成员及以上角色。" /> : null}
         {meQuery.error ? <Alert type="error" showIcon message={(meQuery.error as Error).message} /> : null}
         {assetsQuery.error ? <Alert type="error" showIcon message={(assetsQuery.error as Error).message} /> : null}
         {copyMutation.error ? <Alert type="error" showIcon message={(copyMutation.error as Error).message} /> : null}
@@ -233,7 +254,7 @@ export default function ConsoleScriptAssetsPage() {
               style={{ width: 150 }}
               value={status || undefined}
               onChange={(value) => setStatus(value || "")}
-              options={["active", "archived"].map((item) => ({ value: item, label: item }))}
+              options={["active", "archived"].map((item) => ({ value: item, label: assetStatusLabel[item] || item }))}
             />
             <Select
               allowClear
@@ -275,7 +296,7 @@ export default function ConsoleScriptAssetsPage() {
             <Input.TextArea rows={4} />
           </Form.Item>
           <Form.Item name="status" label="状态">
-            <Select options={["active", "archived"].map((item) => ({ value: item, label: item }))} />
+            <Select options={["active", "archived"].map((item) => ({ value: item, label: assetStatusLabel[item] || item }))} />
           </Form.Item>
           <Form.Item name="tags" label="标签">
             <Input placeholder="用英文逗号分隔" />

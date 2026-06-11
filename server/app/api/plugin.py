@@ -32,7 +32,7 @@ from server.app.schemas.plugin import (
     VerifyRequest,
     VerifyResponse,
 )
-from server.app.services.auth import authenticate_admin, authenticate_plugin, create_admin_session, create_user_session, hash_api_key, verify_password
+from server.app.services.auth import authenticate_admin, authenticate_plugin, create_admin_session, create_user_session, current_plugin_api_key_user_id, hash_api_key, verify_password
 from server.app.services.billing import assert_workspace_quota, record_usage
 from server.app.services.default_templates import builtin_template_rows
 from server.app.services.llm_orchestrator import generate_script, regenerate_script, repair_script
@@ -295,7 +295,38 @@ def _require_workspace_task(db: Session, workspace: Workspace, task_id: int):
     return task
 
 
-def _submit_generation(db: Session, workspace: Workspace, action: str, request, extra=None):
+def _account_token_user_id(db: Session, workspace: Workspace, account_token: str):
+    token = (account_token or "").strip()
+    if not token:
+        return None
+    session = db.execute(
+        select(UserSession).where(
+            UserSession.token_hash == hash_api_key(token),
+            UserSession.status == "active",
+            UserSession.expires_at > datetime.utcnow(),
+        )
+    ).scalar_one_or_none()
+    if session is None:
+        return None
+    user = db.get(User, session.user_id)
+    if user is None or user.status != "active":
+        return None
+    member = db.execute(
+        select(WorkspaceMember).where(
+            WorkspaceMember.workspace_id == workspace.id,
+            WorkspaceMember.user_id == user.id,
+            WorkspaceMember.status == "active",
+        )
+    ).scalar_one_or_none()
+    return user.id if member is not None else None
+
+
+def _request_created_by_user_id(db: Session, workspace: Workspace, request):
+    account_user_id = _account_token_user_id(db, workspace, getattr(request, "account_token", ""))
+    return account_user_id if account_user_id is not None else current_plugin_api_key_user_id()
+
+
+def _submit_generation(db: Session, workspace: Workspace, action: str, request, extra=None, created_by_user_id=None):
     assert_workspace_quota(db, workspace, "tasks")
     assert_workspace_quota(db, workspace, "concurrent")
     task = create_task(
@@ -307,6 +338,7 @@ def _submit_generation(db: Session, workspace: Workspace, action: str, request, 
         request.modeling_mode,
         request.project_id,
         status="queued",
+        created_by_user_id=created_by_user_id,
     )
     payload = {
         "action": action,
@@ -321,7 +353,7 @@ def _submit_generation(db: Session, workspace: Workspace, action: str, request, 
     return GenerationSubmitResponse(task_id=task.id, status=task.status, message="任务已进入队列。")
 
 
-def _run_generation(db, workspace, action, request, callback):
+def _run_generation(db, workspace, action, request, callback, created_by_user_id=None):
     assert_workspace_quota(db, workspace, "tasks")
     assert_workspace_quota(db, workspace, "concurrent")
     task = create_task(
@@ -332,6 +364,7 @@ def _run_generation(db, workspace, action, request, callback):
         request.context,
         request.modeling_mode,
         request.project_id,
+        created_by_user_id=created_by_user_id,
     )
     started = time.time()
     try:
@@ -354,7 +387,7 @@ def submit_generate(
     db: Session = Depends(get_db),
     workspace=Depends(authenticate_plugin),
 ):
-    return _submit_generation(db, workspace, "generate", request)
+    return _submit_generation(db, workspace, "generate", request, created_by_user_id=_request_created_by_user_id(db, workspace, request))
 
 
 @router.post("/repair/submit", response_model=GenerationSubmitResponse)
@@ -369,6 +402,7 @@ def submit_repair(
         "repair",
         request,
         {"failed_script": request.failed_script, "error_text": request.error_text},
+        created_by_user_id=_request_created_by_user_id(db, workspace, request),
     )
 
 
@@ -378,7 +412,7 @@ def submit_regenerate(
     db: Session = Depends(get_db),
     workspace=Depends(authenticate_plugin),
 ):
-    return _submit_generation(db, workspace, "regenerate", request, {"parameters": request.parameters})
+    return _submit_generation(db, workspace, "regenerate", request, {"parameters": request.parameters}, created_by_user_id=_request_created_by_user_id(db, workspace, request))
 
 
 @router.get("/tasks/{task_id}", response_model=GenerationTaskStatusResponse)
@@ -507,6 +541,7 @@ def generate(
         "generate",
         request,
         lambda: generate_script(request.prompt, request.context, request.modeling_mode),
+        created_by_user_id=_request_created_by_user_id(db, workspace, request),
     )
 
 
@@ -528,6 +563,7 @@ def repair(
             request.error_text,
             request.modeling_mode,
         ),
+        created_by_user_id=_request_created_by_user_id(db, workspace, request),
     )
 
 
@@ -548,6 +584,7 @@ def regenerate(
             request.parameters,
             request.modeling_mode,
         ),
+        created_by_user_id=_request_created_by_user_id(db, workspace, request),
     )
 
 

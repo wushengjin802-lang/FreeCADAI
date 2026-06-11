@@ -153,6 +153,7 @@ export type ScriptVersion = {
 export type ScriptAsset = {
   id: number;
   workspace_id: number;
+  workspace_name?: string;
   task_id?: number | null;
   current_version_id?: number | null;
   current_version?: number | null;

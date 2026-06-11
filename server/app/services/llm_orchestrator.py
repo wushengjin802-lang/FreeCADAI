@@ -13,6 +13,8 @@ from server.app.core.config import settings
 
 
 def _client():
+    if not settings.llm_api_key:
+        raise RuntimeError("企业云端 LLM 未配置：请在服务端设置 FREECADAI_LLM_API_KEY，并重启 api/worker 服务。")
     return OpenAICompatibleClient(
         settings.llm_base_url,
         settings.llm_api_key,

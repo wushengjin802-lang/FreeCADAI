@@ -19,6 +19,7 @@ _admin_actor = ContextVar("admin_actor", default="admin")
 _admin_principal = ContextVar("admin_principal", default={"id": None, "username": "admin", "role": "viewer"})
 _user_actor = ContextVar("user_actor", default="user:anonymous")
 _user_principal = ContextVar("user_principal", default={"id": None, "email": "", "display_name": "", "status": "anonymous"})
+_plugin_api_key_user_id = ContextVar("plugin_api_key_user_id", default=None)
 
 
 def hash_api_key(api_key):
@@ -64,7 +65,32 @@ def current_user_principal():
     return _user_principal.get()
 
 
+def current_plugin_api_key_user_id():
+    return _plugin_api_key_user_id.get()
+
+
+def _fallback_workspace_user_id(db: Session, workspace_id: int):
+    member = db.execute(
+        select(WorkspaceMember)
+        .where(
+            WorkspaceMember.workspace_id == workspace_id,
+            WorkspaceMember.status == "active",
+            WorkspaceMember.role.in_(("owner", "admin")),
+        )
+        .order_by(WorkspaceMember.role.desc(), WorkspaceMember.id.asc())
+    ).scalar_one_or_none()
+    if member is not None:
+        return member.user_id
+    member = db.execute(
+        select(WorkspaceMember)
+        .where(WorkspaceMember.workspace_id == workspace_id, WorkspaceMember.status == "active")
+        .order_by(WorkspaceMember.id.asc())
+    ).scalar_one_or_none()
+    return member.user_id if member is not None else None
+
+
 def authenticate_plugin(db: Session = Depends(get_db), authorization: str = Header(default="")):
+    _plugin_api_key_user_id.set(None)
     token = _extract_bearer(authorization)
     if settings.plugin_api_key and hmac.compare_digest(token, settings.plugin_api_key):
         workspace = db.execute(select(Workspace).where(Workspace.id == 1)).scalar_one_or_none()
@@ -88,6 +114,9 @@ def authenticate_plugin(db: Session = Depends(get_db), authorization: str = Head
     workspace = db.execute(select(Workspace).where(Workspace.id == api_key.workspace_id)).scalar_one_or_none()
     if workspace is None or workspace.status != "active":
         raise HTTPException(status_code=403, detail="Workspace is not active.")
+    if api_key.created_by_user_id is None:
+        api_key.created_by_user_id = _fallback_workspace_user_id(db, workspace.id)
+    _plugin_api_key_user_id.set(api_key.created_by_user_id)
     db.commit()
     return workspace
 

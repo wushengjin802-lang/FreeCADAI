@@ -8,11 +8,20 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ConsoleShell } from "@/components/ConsoleShell";
 import { consoleApi } from "@/lib/api";
+import { formatShanghaiTime } from "@/lib/format";
 import { routePath } from "@/lib/routes";
 import { canManageWorkspace, useConsoleStore } from "@/lib/store";
 import type { ConsoleTaskListItem } from "@/lib/types";
 
 const { Text, Title } = Typography;
+
+const taskStatusLabel: Record<string, string> = {
+  queued: "排队中",
+  running: "生成中",
+  succeeded: "已成功",
+  failed: "已失败",
+  canceled: "已取消"
+};
 
 function statusColor(status: string) {
   if (status === "succeeded") return "green";
@@ -95,10 +104,10 @@ export default function ConsoleTasksPage() {
         </Space>
       )
     },
-    { title: "状态", dataIndex: "status", width: 120, render: (value) => <Tag color={statusColor(value)}>{value}</Tag> },
+    { title: "状态", dataIndex: "status", width: 120, render: (value) => <Tag color={statusColor(value)}>{taskStatusLabel[value] || value}</Tag> },
     { title: "模型", dataIndex: "model", width: 180 },
     { title: "耗时", dataIndex: "latency_ms", width: 110, render: (value) => (value ? `${value} ms` : "-") },
-    { title: "创建时间", dataIndex: "created_at", width: 190 },
+    { title: "创建时间", dataIndex: "created_at", width: 190, render: (value) => formatShanghaiTime(value) },
     {
       title: "操作",
       width: 220,
@@ -143,7 +152,7 @@ export default function ConsoleTasksPage() {
           </Button>
         </section>
 
-        {workspace?.role === "viewer" ? <Alert type="info" showIcon message="Viewer 角色只能查看任务，不能新建、取消或重试。" /> : null}
+        {workspace?.role === "viewer" ? <Alert type="info" showIcon message="观察者角色只能查看任务，不能新建、取消或重试。" /> : null}
         {meQuery.error ? <Alert type="error" showIcon message={(meQuery.error as Error).message} /> : null}
         {tasksQuery.error ? <Alert type="error" showIcon message={(tasksQuery.error as Error).message} /> : null}
         {cancelMutation.error ? <Alert type="error" showIcon message={(cancelMutation.error as Error).message} /> : null}
@@ -158,7 +167,7 @@ export default function ConsoleTasksPage() {
               style={{ width: 150 }}
               value={status || undefined}
               onChange={(value) => setStatus(value || "")}
-              options={["queued", "running", "succeeded", "failed", "canceled"].map((item) => ({ value: item, label: item }))}
+              options={["queued", "running", "succeeded", "failed", "canceled"].map((item) => ({ value: item, label: taskStatusLabel[item] || item }))}
             />
             <Space>
               <Switch checked={mine} onChange={setMine} />

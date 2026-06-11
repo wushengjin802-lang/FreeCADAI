@@ -274,18 +274,30 @@ function Dashboard({
   billing?: BillingSummary;
   health?: { ok: boolean; service: string; redis: boolean };
 }) {
-  const option = useMemo(
+  const taskTrendOption = useMemo(
     () => ({
       tooltip: { trigger: "axis" },
       legend: { top: 0 },
       grid: { left: 28, right: 16, top: 44, bottom: 28 },
       xAxis: { type: "category", data: daily.map((item) => item.day) },
-      yAxis: { type: "value" },
+      yAxis: { type: "value", name: "次数", minInterval: 1 },
       series: [
         { name: "任务", type: "line", smooth: true, data: daily.map((item) => item.task_count), color: "#355263" },
         { name: "成功", type: "line", smooth: true, data: daily.map((item) => item.succeeded_count), color: "#16734a" },
-        { name: "失败", type: "line", smooth: true, data: daily.map((item) => item.failed_count), color: "#a23b3b" },
-        { name: "Token", type: "bar", data: daily.map((item) => item.total_tokens), color: "#9a6a24" }
+        { name: "失败", type: "line", smooth: true, data: daily.map((item) => item.failed_count), color: "#a23b3b" }
+      ]
+    }),
+    [daily]
+  );
+  const tokenTrendOption = useMemo(
+    () => ({
+      tooltip: { trigger: "axis" },
+      legend: { top: 0 },
+      grid: { left: 56, right: 16, top: 44, bottom: 28 },
+      xAxis: { type: "category", data: daily.map((item) => item.day) },
+      yAxis: { type: "value", name: "Token" },
+      series: [
+        { name: "Token", type: "bar", data: daily.map((item) => item.total_tokens), color: "#9a6a24", barMaxWidth: 36 }
       ]
     }),
     [daily]
@@ -327,9 +339,18 @@ function Dashboard({
           <Descriptions.Item label="Redis">{health?.redis ? <Tag color="green">正常</Tag> : <Tag color="red">异常</Tag>}</Descriptions.Item>
         </Descriptions>
       </Card>
-      <Card title="近 14 天用量趋势" className="console-card">
-        <ReactECharts option={option} style={{ height: 330 }} />
-      </Card>
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={12}>
+          <Card title="近 14 天任务趋势" className="console-card">
+            <ReactECharts option={taskTrendOption} style={{ height: 320 }} />
+          </Card>
+        </Col>
+        <Col xs={24} lg={12}>
+          <Card title="近 14 天 Token 消耗" className="console-card">
+            <ReactECharts option={tokenTrendOption} style={{ height: 320 }} />
+          </Card>
+        </Col>
+      </Row>
       <Card title="按模型用量" className="console-card">
         <Table rowKey={(row) => `${row.provider}-${row.model}`} className="usage-model-table balanced-table" columns={modelColumns} dataSource={usageByModel} pagination={false} scroll={{ x: 1120 }} tableLayout="fixed" />
       </Card>
@@ -602,11 +623,11 @@ function AssetsView({ role }: { role?: string }) {
 
   const scriptColumns: ColumnsType<ScriptAsset> = [
     { title: "ID", dataIndex: "id", width: 80 },
-    { title: "工作区", dataIndex: "workspace_id", width: 90 },
+    { title: "工作区", dataIndex: "workspace_name", width: 160, render: (value, row) => value || `工作区 ID ${row.workspace_id}` },
     { title: "名称", dataIndex: "name", width: 220, ellipsis: true },
     { title: "版本", dataIndex: "current_version", width: 90, render: (value) => value ? `v${value}` : "-" },
     { title: "模式", dataIndex: "modeling_mode", width: 120 },
-    { title: "项目", dataIndex: "project_id", width: 140, render: (value) => value || "-" },
+    { title: "项目名称", dataIndex: "project_id", width: 140, render: (value) => value || "-" },
     { title: "收藏", dataIndex: "favorite", width: 90, render: (value) => <Tag color={value ? "gold" : "default"}>{value ? "已收藏" : "普通"}</Tag> },
     { title: "摘要", dataIndex: "summary", ellipsis: true },
     { title: "更新时间", dataIndex: "updated_at", width: 180, render: (value) => formatShanghaiTime(value) },
@@ -689,7 +710,7 @@ function AssetsView({ role }: { role?: string }) {
                       <Col xs={24} md={6}><Form.Item name="file_type" label="文件类型"><Input placeholder="FCStd / STEP" /></Form.Item></Col>
                       <Col xs={24} md={6}><Form.Item name="script_asset_id" label="关联脚本资产 ID"><Input /></Form.Item></Col>
                       <Col xs={24} md={6}><Form.Item name="task_id" label="关联任务 ID"><Input /></Form.Item></Col>
-                      <Col xs={24} md={6}><Form.Item name="project_id" label="Project ID"><Input /></Form.Item></Col>
+                      <Col xs={24} md={6}><Form.Item name="project_id" label="项目名称"><Input /></Form.Item></Col>
                       <Col xs={24} md={12}><Form.Item name="storage_uri" label="存储地址"><Input /></Form.Item></Col>
                       <Col xs={24} md={12}><Form.Item name="preview_uri" label="预览地址"><Input /></Form.Item></Col>
                     </Row>
@@ -709,7 +730,7 @@ function AssetsView({ role }: { role?: string }) {
           <Descriptions size="small" column={2} bordered>
             <Descriptions.Item label="名称">{selectedScript?.name}</Descriptions.Item>
             <Descriptions.Item label="当前版本">{selectedScript?.current_version ? `v${selectedScript.current_version}` : "-"}</Descriptions.Item>
-            <Descriptions.Item label="项目">{selectedScript?.project_id || "-"}</Descriptions.Item>
+            <Descriptions.Item label="项目名称">{selectedScript?.project_id || "-"}</Descriptions.Item>
             <Descriptions.Item label="模式">{selectedScript?.modeling_mode}</Descriptions.Item>
           </Descriptions>
           <Space>

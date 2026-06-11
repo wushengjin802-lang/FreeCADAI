@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ConsoleShell } from "@/components/ConsoleShell";
 import { consoleApi } from "@/lib/api";
+import { formatShanghaiTime } from "@/lib/format";
 import { routePath } from "@/lib/routes";
 import { canManageWorkspace, useConsoleStore } from "@/lib/store";
 import type { AuditLog } from "@/lib/types";
@@ -46,7 +47,7 @@ export default function ConsoleAuditPage() {
   });
 
   const columns: ColumnsType<AuditLog> = [
-    { title: "时间", dataIndex: "created_at", width: 180 },
+    { title: "时间", dataIndex: "created_at", width: 180, render: (value) => formatShanghaiTime(value) },
     { title: "操作者", dataIndex: "actor", width: 150 },
     { title: "动作", dataIndex: "action", width: 230, render: (value) => <Tag>{value}</Tag> },
     { title: "对象", width: 170, render: (_, row) => `${row.target_type} #${row.target_id}` },
@@ -66,7 +67,7 @@ export default function ConsoleAuditPage() {
         </section>
 
         {meQuery.error || logs.error ? <Alert type="error" showIcon message={((meQuery.error || logs.error) as Error).message} /> : null}
-        {!canView ? <Alert type="info" showIcon message="审计日志仅 Owner/Admin 可查看。" /> : null}
+        {!canView ? <Alert type="info" showIcon message="审计日志仅拥有者/管理员可查看。" /> : null}
         {canView ? (
           <Card className="console-card">
             <Space wrap style={{ marginBottom: 16 }}>

@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ConsoleShell } from "@/components/ConsoleShell";
 import { consoleApi } from "@/lib/api";
+import { formatShanghaiTime } from "@/lib/format";
 import { routePath } from "@/lib/routes";
 import { canManageWorkspace, useConsoleStore } from "@/lib/store";
 import type { ConsoleInvite, ConsoleMember } from "@/lib/types";
@@ -15,6 +16,7 @@ import type { ConsoleInvite, ConsoleMember } from "@/lib/types";
 const { Text, Title } = Typography;
 
 const roleOptions = [
+  { value: "owner", label: "拥有者", disabled: true },
   { value: "admin", label: "管理员" },
   { value: "member", label: "成员" },
   { value: "viewer", label: "观察者" }
@@ -121,13 +123,13 @@ export default function ConsoleMembersPage() {
   });
 
   const columns: ColumnsType<ConsoleMember> = [
-    { title: "成员", dataIndex: "display_name", render: (_, row) => <Space direction="vertical" size={0}><Text strong>{row.display_name || row.email}</Text><Text className="muted">{row.email}</Text></Space> },
-    { title: "角色", dataIndex: "role", width: 140, render: (role) => <Tag color={roleColor(role)}>{roleLabelText(role)}</Tag> },
+    { title: "成员", dataIndex: "display_name", width: 300, render: (_, row) => <Space direction="vertical" size={0}><Text strong>{row.display_name || row.email}</Text><Text className="muted">{row.email}</Text></Space> },
+    { title: "角色", dataIndex: "role", width: 130, render: (role) => <Tag color={roleColor(role)}>{roleLabelText(role)}</Tag> },
     { title: "状态", dataIndex: "status", width: 120, render: (status) => <Tag color={memberStatusColor(status)}>{memberStatusLabel[status] || status}</Tag> },
-    { title: "加入时间", dataIndex: "joined_at", width: 190, render: (value) => value || "-" },
+    { title: "加入时间", dataIndex: "joined_at", width: 190, render: (value) => formatShanghaiTime(value) },
     {
       title: "操作",
-      width: 280,
+      width: 230,
       align: "right",
       render: (_, row) => (
         <Space>
@@ -135,7 +137,7 @@ export default function ConsoleMembersPage() {
             size="small"
             disabled={!canManage || row.role === "owner"}
             value={row.role}
-            style={{ width: 110 }}
+            style={{ width: 118 }}
             options={roleOptions}
             onChange={(role) => updateMutation.mutate({ memberId: row.id, body: { role } })}
           />
@@ -184,7 +186,8 @@ export default function ConsoleMembersPage() {
             columns={columns}
             dataSource={membersQuery.data || []}
             pagination={false}
-            scroll={{ x: 900 }}
+            scroll={{ x: 970 }}
+            tableLayout="fixed"
           />
         </Card>
       </Space>

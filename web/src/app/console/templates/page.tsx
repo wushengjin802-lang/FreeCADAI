@@ -169,7 +169,7 @@ export default function ConsoleTemplatesPage() {
           </Space>
         </section>
 
-        {!canManage ? <Alert type="info" showIcon message="当前角色可以查看和复用模板，新增、编辑、删除需要 Owner/Admin 权限。" /> : null}
+        {!canManage ? <Alert type="info" showIcon message="当前角色可以查看和复用模板，新增、编辑、删除需要拥有者/管理员权限。" /> : null}
         {meQuery.error ? <Alert type="error" showIcon message={(meQuery.error as Error).message} /> : null}
         {templatesQuery.error ? <Alert type="error" showIcon message={(templatesQuery.error as Error).message} /> : null}
         {createMutation.error ? <Alert type="error" showIcon message={(createMutation.error as Error).message} /> : null}

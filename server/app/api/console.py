@@ -257,9 +257,11 @@ def _script_version_out(row: ScriptVersion):
 
 def _script_asset_out(db: Session, row: ScriptAsset):
     version = current_script_version(db, row)
+    workspace = db.get(Workspace, row.workspace_id)
     return ScriptAssetOut(
         id=row.id,
         workspace_id=row.workspace_id,
+        workspace_name=workspace.name if workspace else "",
         task_id=row.task_id,
         current_version_id=row.current_version_id,
         current_version=version.version if version else None,
@@ -945,16 +947,24 @@ def console_usage_by_member(workspace_id: int, db: Session = Depends(get_db), us
     _workspace, member = require_workspace_member(db, user["id"], workspace_id)
     if member.role not in CONSOLE_WRITE_ROLES:
         user_ids = [user["id"]]
+        fallback_user_id = None
     else:
-        user_ids = [
-            row.user_id
-            for row in db.execute(select(WorkspaceMember).where(WorkspaceMember.workspace_id == workspace_id, WorkspaceMember.status == "active")).scalars().all()
-        ]
+        members = db.execute(
+            select(WorkspaceMember)
+            .where(WorkspaceMember.workspace_id == workspace_id, WorkspaceMember.status == "active")
+            .order_by(WorkspaceMember.id.asc())
+        ).scalars().all()
+        user_ids = [row.user_id for row in members]
+        fallback_member = next((row for row in members if row.role in CONSOLE_WRITE_ROLES), members[0] if members else None)
+        fallback_user_id = fallback_member.user_id if fallback_member else None
     result = []
     for user_id in user_ids:
         row_user = db.get(User, user_id)
-        task_ids = select(GenerationTask.id).where(GenerationTask.workspace_id == workspace_id, GenerationTask.created_by_user_id == user_id)
-        task_count = db.scalar(select(func.count()).select_from(GenerationTask).where(GenerationTask.workspace_id == workspace_id, GenerationTask.created_by_user_id == user_id)) or 0
+        owner_filter = GenerationTask.created_by_user_id == user_id
+        if fallback_user_id == user_id:
+            owner_filter = or_(owner_filter, GenerationTask.created_by_user_id.is_(None))
+        task_ids = select(GenerationTask.id).where(GenerationTask.workspace_id == workspace_id, owner_filter)
+        task_count = db.scalar(select(func.count()).select_from(GenerationTask).where(GenerationTask.workspace_id == workspace_id, owner_filter)) or 0
         usage = db.execute(
             select(
                 func.coalesce(func.sum(UsageRecord.input_tokens), 0),
@@ -963,18 +973,51 @@ def console_usage_by_member(workspace_id: int, db: Session = Depends(get_db), us
                 func.coalesce(func.sum(UsageRecord.estimated_cost), 0),
             ).where(UsageRecord.workspace_id == workspace_id, UsageRecord.task_id.in_(task_ids))
         ).one()
-        result.append(
-            ConsoleUsageMemberItem(
-                user_id=user_id,
-                email=row_user.email if row_user else "",
-                display_name=row_user.display_name if row_user else "",
-                task_count=int(task_count),
-                input_tokens=int(usage[0] or 0),
-                output_tokens=int(usage[1] or 0),
-                total_tokens=int(usage[2] or 0),
-                estimated_cost=float(usage[3] or 0),
+        if task_count or usage[2]:
+            result.append(
+                ConsoleUsageMemberItem(
+                    user_id=user_id,
+                    email=row_user.email if row_user else "",
+                    display_name=row_user.display_name if row_user else "",
+                    task_count=int(task_count),
+                    input_tokens=int(usage[0] or 0),
+                    output_tokens=int(usage[1] or 0),
+                    total_tokens=int(usage[2] or 0),
+                    estimated_cost=float(usage[3] or 0),
             )
         )
+
+    # 统计无归属任务（created_by_user_id IS NULL，如通过主 API Key 提交）
+    if member.role in CONSOLE_WRITE_ROLES and fallback_user_id is None:
+        orphan_task_ids = select(GenerationTask.id).where(
+            GenerationTask.workspace_id == workspace_id, GenerationTask.created_by_user_id.is_(None))
+        orphan_count = db.scalar(select(func.count()).select_from(GenerationTask).where(
+            GenerationTask.workspace_id == workspace_id, GenerationTask.created_by_user_id.is_(None))) or 0
+        orphan_usage = db.execute(
+            select(
+                func.coalesce(func.sum(UsageRecord.input_tokens), 0),
+                func.coalesce(func.sum(UsageRecord.output_tokens), 0),
+                func.coalesce(func.sum(UsageRecord.total_tokens), 0),
+                func.coalesce(func.sum(UsageRecord.estimated_cost), 0),
+            ).where(UsageRecord.workspace_id == workspace_id, UsageRecord.task_id.in_(orphan_task_ids))
+        ).one()
+    else:
+        orphan_count = 0
+        orphan_usage = (0, 0, 0, 0)
+    if orphan_count or orphan_usage[2]:
+        result.append(
+            ConsoleUsageMemberItem(
+                user_id=None,
+                email="",
+                display_name="未分配",
+                task_count=int(orphan_count),
+                input_tokens=int(orphan_usage[0] or 0),
+                output_tokens=int(orphan_usage[1] or 0),
+                total_tokens=int(orphan_usage[2] or 0),
+                estimated_cost=float(orphan_usage[3] or 0),
+            )
+        )
+
     return result
 
 
@@ -983,7 +1026,7 @@ def console_usage_by_project(workspace_id: int, db: Session = Depends(get_db), u
     _workspace, member = require_workspace_member(db, user["id"], workspace_id)
     task_stmt = select(
         GenerationTask.project_id,
-        func.count(GenerationTask.id),
+        func.count(func.distinct(GenerationTask.id)),
         func.coalesce(func.sum(UsageRecord.input_tokens), 0),
         func.coalesce(func.sum(UsageRecord.output_tokens), 0),
         func.coalesce(func.sum(UsageRecord.total_tokens), 0),
@@ -991,7 +1034,7 @@ def console_usage_by_project(workspace_id: int, db: Session = Depends(get_db), u
     ).outerjoin(UsageRecord, UsageRecord.task_id == GenerationTask.id).where(GenerationTask.workspace_id == workspace_id)
     if member.role not in CONSOLE_WRITE_ROLES:
         task_stmt = task_stmt.where(GenerationTask.created_by_user_id == user["id"])
-    rows = db.execute(task_stmt.group_by(GenerationTask.project_id).order_by(desc(func.count(GenerationTask.id)))).all()
+    rows = db.execute(task_stmt.group_by(GenerationTask.project_id).order_by(desc(func.count(func.distinct(GenerationTask.id))))).all()
     return [
         ConsoleUsageProjectItem(
             project_id=row[0] or "未归档项目",

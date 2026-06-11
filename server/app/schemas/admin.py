@@ -91,6 +91,7 @@ class ScriptVersionOut(BaseModel):
 class ScriptAssetOut(BaseModel):
     id: int
     workspace_id: int
+    workspace_name: str = ""
     task_id: Optional[int] = None
     current_version_id: Optional[int] = None
     current_version: Optional[int] = None

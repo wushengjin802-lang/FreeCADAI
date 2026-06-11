@@ -74,7 +74,7 @@ export default function ConsoleBillingPage() {
         </section>
 
         {summary.error || checkout.error ? <Alert type="error" showIcon message={((summary.error || checkout.error) as Error).message} /> : null}
-        {!canManage ? <Alert type="info" showIcon message="当前角色可以查看套餐和额度，升级套餐需要 Owner/Admin 权限。" /> : null}
+        {!canManage ? <Alert type="info" showIcon message="当前角色可以查看套餐和额度，升级套餐需要拥有者/管理员权限。" /> : null}
         {quota?.warnings?.length ? <Alert type="warning" showIcon message="额度提醒" description={quota.warnings.join("；")} /> : null}
 
         {quota ? (

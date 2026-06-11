@@ -1,6 +1,7 @@
 """Minimal client for the FreeCADAI SaaS plugin API."""
 
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -15,10 +16,11 @@ class CloudClientError(RuntimeError):
 class FreeCADAICloudClient:
     """Call the FreeCADAI SaaS plugin API using only Python stdlib."""
 
-    def __init__(self, base_url, api_key, project_id="", timeout=90):
+    def __init__(self, base_url, api_key, project_id="", account_token="", timeout=90):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key.strip()
         self.project_id = project_id.strip()
+        self.account_token = account_token.strip()
         self.timeout = timeout
         self.poll_timeout = 900
         self.poll_interval = 2.0
@@ -35,14 +37,17 @@ class FreeCADAICloudClient:
         return self._submit_and_wait(self.submit_generate(prompt, context, modeling_mode))
 
     def submit_generate(self, prompt, context, modeling_mode):
-        return self._post(
-            "/api/v1/plugin/generate/submit",
+        payload = self._task_payload(
             {
                 "prompt": prompt,
                 "context": context,
                 "modeling_mode": modeling_mode,
                 "project_id": self.project_id,
-            },
+            }
+        )
+        return self._post(
+            "/api/v1/plugin/generate/submit",
+            payload,
             timeout=20,
         )
 
@@ -50,8 +55,7 @@ class FreeCADAICloudClient:
         return self._submit_and_wait(self.submit_repair(prompt, context, failed_script, error_text, modeling_mode))
 
     def submit_repair(self, prompt, context, failed_script, error_text, modeling_mode):
-        return self._post(
-            "/api/v1/plugin/repair/submit",
+        payload = self._task_payload(
             {
                 "prompt": prompt,
                 "context": context,
@@ -59,7 +63,11 @@ class FreeCADAICloudClient:
                 "error_text": error_text,
                 "modeling_mode": modeling_mode,
                 "project_id": self.project_id,
-            },
+            }
+        )
+        return self._post(
+            "/api/v1/plugin/repair/submit",
+            payload,
             timeout=20,
         )
 
@@ -67,17 +75,26 @@ class FreeCADAICloudClient:
         return self._submit_and_wait(self.submit_regenerate(prompt, context, parameters_text, modeling_mode))
 
     def submit_regenerate(self, prompt, context, parameters_text, modeling_mode):
-        return self._post(
-            "/api/v1/plugin/regenerate/submit",
+        payload = self._task_payload(
             {
                 "prompt": prompt,
                 "context": context,
                 "parameters": parameters_text,
                 "modeling_mode": modeling_mode,
                 "project_id": self.project_id,
-            },
+            }
+        )
+        return self._post(
+            "/api/v1/plugin/regenerate/submit",
+            payload,
             timeout=20,
         )
+
+    def _task_payload(self, payload):
+        if self.account_token:
+            payload = dict(payload)
+            payload["account_token"] = self.account_token
+        return payload
 
     def _old_generate_payload(self, prompt, context, modeling_mode):
         return {
@@ -236,10 +253,38 @@ def format_cloud_error(exc):
     text = str(exc)
     if isinstance(exc, LLMClientError):
         text = str(exc)
+    if "FREECADAI_LLM_API_KEY" in text or "LLMClientError: API Key is required" in text or "API Key is required." in text:
+        return (
+            "企业云端生成失败：平台服务端没有配置模型 API Key。\n"
+            "请在部署环境为 api 和 worker 设置 FREECADAI_LLM_API_KEY，并重启服务。"
+        )
+    http_match = None
+    for line in reversed(text.splitlines()):
+        match = re.search(r"Cloud HTTP (\d+):\s*(.*)", line)
+        if match:
+            http_match = match
+            break
+    if http_match:
+        code = http_match.group(1)
+        raw_detail = http_match.group(2).strip()
+        detail = raw_detail
+        try:
+            payload = json.loads(raw_detail)
+            detail = payload.get("detail") or raw_detail
+        except Exception:
+            pass
+        if code == "402":
+            return "当前工作区额度不足：{}\n请到企业平台检查套餐额度、API Key 过期时间和权限范围。".format(detail)
+        if code in {"401", "403"}:
+            return "云端鉴权失败：请检查插件 API Key 是否正确、是否已启用。"
+        if code == "404":
+            return "云端接口不存在：请检查服务地址是否填写为企业平台根地址。"
+        return "云端请求失败（HTTP {}）：{}".format(code, detail)
     if "HTTP 401" in text or "HTTP 403" in text:
-        return "云端鉴权失败：请检查 SaaS API Key 是否正确、是否已启用。\n\n原始错误：\n{}".format(text)
+        return "云端鉴权失败：请检查插件 API Key 是否正确、是否已启用。"
     if "HTTP 404" in text:
-        return "云端接口不存在：请检查 SaaS Base URL 是否填写为服务根地址。\n\n原始错误：\n{}".format(text)
+        return "云端接口不存在：请检查服务地址是否填写为企业平台根地址。"
     if "timed out" in text.lower() or "timeout" in text.lower():
-        return "云端请求超时：请检查网络或稍后重试。\n\n原始错误：\n{}".format(text)
-    return text
+        return "云端请求超时：请检查网络或稍后重试。"
+    short_lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return short_lines[-1] if short_lines else text

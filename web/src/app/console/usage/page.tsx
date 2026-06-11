@@ -2,7 +2,7 @@
 
 import { BarChartOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Card, Col, Progress, Row, Space, Statistic, Table, Tag, Typography } from "antd";
+import { Alert, Card, Col, Progress, Row, Space, Statistic, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo } from "react";
@@ -10,7 +10,7 @@ import { ConsoleShell } from "@/components/ConsoleShell";
 import { consoleApi } from "@/lib/api";
 import { routePath } from "@/lib/routes";
 import { canManageWorkspace, useConsoleStore } from "@/lib/store";
-import type { ConsoleUsageMemberItem, ConsoleUsageProjectItem, UsageByModelItem, UsageDailyItem } from "@/lib/types";
+import type { ConsoleUsageMemberItem, ConsoleUsageProjectItem, UsageDailyItem } from "@/lib/types";
 
 const { Text, Title } = Typography;
 
@@ -44,33 +44,26 @@ export default function ConsoleUsagePage() {
   const canSeeWorkspace = canManageWorkspace(workspace?.role);
   const usage = useQuery({ queryKey: ["console-usage", token, workspace?.id], queryFn: () => consoleApi.usage(token, workspace?.id as number), enabled: Boolean(token && workspace?.id) });
   const daily = useQuery({ queryKey: ["console-usage-daily", token, workspace?.id], queryFn: () => consoleApi.usageDaily(token, workspace?.id as number), enabled: Boolean(token && workspace?.id) });
-  const byModel = useQuery({ queryKey: ["console-usage-model", token, workspace?.id], queryFn: () => consoleApi.usageByModel(token, workspace?.id as number), enabled: Boolean(token && workspace?.id) });
   const byMember = useQuery({ queryKey: ["console-usage-member", token, workspace?.id], queryFn: () => consoleApi.usageByMember(token, workspace?.id as number), enabled: Boolean(token && workspace?.id) });
   const byProject = useQuery({ queryKey: ["console-usage-project", token, workspace?.id], queryFn: () => consoleApi.usageByProject(token, workspace?.id as number), enabled: Boolean(token && workspace?.id) });
 
   const maxDailyTasks = Math.max(1, ...(daily.data || []).map((item) => item.task_count));
   const memberColumns: ColumnsType<ConsoleUsageMemberItem> = [
-    { title: "成员", dataIndex: "display_name", render: (value, row) => <Space direction="vertical" size={0}><Text strong>{value || row.email || "未绑定用户"}</Text><Text className="muted">{row.email}</Text></Space> },
-    { title: "任务", dataIndex: "task_count", width: 100 },
-    { title: "输入 Token", dataIndex: "input_tokens", width: 130 },
-    { title: "输出 Token", dataIndex: "output_tokens", width: 130 },
-    { title: "总 Token", dataIndex: "total_tokens", width: 130 },
-    { title: "成本", dataIndex: "estimated_cost", width: 120, render: money }
+    { title: "成员", dataIndex: "display_name", width: 220, render: (value, row) => <Space direction="vertical" size={0}><Text strong>{value || row.email || "未绑定用户"}</Text><Text className="muted">{row.email}</Text></Space> },
+    { title: "任务", dataIndex: "task_count", width: 120 },
+    { title: "输入 Token", dataIndex: "input_tokens", width: 150 },
+    { title: "输出 Token", dataIndex: "output_tokens", width: 150 },
+    { title: "总 Token", dataIndex: "total_tokens", width: 150 },
+    { title: "成本", dataIndex: "estimated_cost", width: 140, render: money }
   ];
   const projectColumns: ColumnsType<ConsoleUsageProjectItem> = [
-    { title: "项目", dataIndex: "project_id" },
-    { title: "任务", dataIndex: "task_count", width: 100 },
-    { title: "总 Token", dataIndex: "total_tokens", width: 130 },
-    { title: "成本", dataIndex: "estimated_cost", width: 120, render: money }
+    { title: "项目名称", dataIndex: "project_id", width: 220 },
+    { title: "任务", dataIndex: "task_count", width: 120 },
+    { title: "输入 Token", dataIndex: "input_tokens", width: 150 },
+    { title: "输出 Token", dataIndex: "output_tokens", width: 150 },
+    { title: "总 Token", dataIndex: "total_tokens", width: 150 },
+    { title: "成本", dataIndex: "estimated_cost", width: 140, render: money }
   ];
-  const modelColumns: ColumnsType<UsageByModelItem> = [
-    { title: "Provider", dataIndex: "provider", width: 140, render: (value) => <Tag>{value}</Tag> },
-    { title: "模型", dataIndex: "model" },
-    { title: "请求", dataIndex: "request_count", width: 100 },
-    { title: "总 Token", dataIndex: "total_tokens", width: 130 },
-    { title: "成本", dataIndex: "estimated_cost", width: 120, render: money }
-  ];
-
   if (!token) return null;
 
   return (
@@ -83,7 +76,7 @@ export default function ConsoleUsagePage() {
           </div>
         </section>
         {meQuery.error || usage.error ? <Alert type="error" showIcon message={((meQuery.error || usage.error) as Error).message} /> : null}
-        {!canSeeWorkspace ? <Alert type="info" showIcon message="Member/Viewer 角色默认只能查看个人用量；Owner/Admin 可查看工作区整体用量。" /> : null}
+        {!canSeeWorkspace ? <Alert type="info" showIcon message="成员/观察者默认只能查看个人用量；拥有者/管理员可查看工作区整体用量。" /> : null}
 
         <Row gutter={[16, 16]}>
           <Col xs={24} sm={12} lg={6}><Card className="console-card metric-card"><Statistic title="任务总数" value={usage.data?.task_count || 0} /></Card></Col>
@@ -107,19 +100,15 @@ export default function ConsoleUsagePage() {
         <Row gutter={[16, 16]}>
           <Col xs={24} xl={12}>
             <Card className="console-card" title="按项目">
-              <Table rowKey="project_id" columns={projectColumns} dataSource={byProject.data || []} loading={byProject.isLoading} pagination={false} scroll={{ x: 620 }} />
+              <Table rowKey="project_id" columns={projectColumns} dataSource={byProject.data || []} loading={byProject.isLoading} pagination={false} scroll={{ x: 930 }} tableLayout="fixed" />
             </Card>
           </Col>
           <Col xs={24} xl={12}>
-            <Card className="console-card" title="按模型">
-              <Table rowKey={(row) => `${row.provider}-${row.model}`} columns={modelColumns} dataSource={byModel.data || []} loading={byModel.isLoading} pagination={false} scroll={{ x: 720 }} />
+            <Card className="console-card" title={canSeeWorkspace ? "按成员" : "我的消耗"}>
+              <Table rowKey={(row) => String(row.user_id || row.email)} className="enterprise-usage-member-table" columns={memberColumns} dataSource={byMember.data || []} loading={byMember.isLoading} pagination={false} scroll={{ x: 930 }} tableLayout="fixed" />
             </Card>
           </Col>
         </Row>
-
-        <Card className="console-card" title={canSeeWorkspace ? "按成员" : "我的消耗"}>
-          <Table rowKey={(row) => String(row.user_id || row.email)} className="enterprise-usage-member-table" columns={memberColumns} dataSource={byMember.data || []} loading={byMember.isLoading} pagination={false} scroll={{ x: 900 }} />
-        </Card>
       </Space>
     </ConsoleShell>
   );

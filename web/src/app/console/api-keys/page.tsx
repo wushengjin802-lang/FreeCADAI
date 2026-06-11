@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ConsoleShell } from "@/components/ConsoleShell";
 import { consoleApi } from "@/lib/api";
+import { formatShanghaiTime } from "@/lib/format";
 import { routePath } from "@/lib/routes";
 import { canManageWorkspace, useConsoleStore } from "@/lib/store";
 import type { ApiKey, ConsoleApiKeyCreateResponse } from "@/lib/types";
@@ -109,8 +110,8 @@ export default function ConsoleApiKeysPage() {
     { title: "名称", dataIndex: "name", render: (value, row) => <Space direction="vertical" size={0}><Text strong>{value}</Text><Text className="muted">{row.scopes?.join(", ") || "plugin"}</Text></Space> },
     { title: "前缀", dataIndex: "prefix", width: 160, render: (value) => <Text code>{value}</Text> },
     { title: "状态", dataIndex: "status", width: 120, render: (status) => <Tag color={statusColor(status)}>{apiKeyStatusLabel[status] || status}</Tag> },
-    { title: "过期时间", dataIndex: "expires_at", width: 190, render: (value) => value || "长期" },
-    { title: "最后使用", dataIndex: "last_used_at", width: 190, render: (value) => value || "-" },
+    { title: "过期时间", dataIndex: "expires_at", width: 190, render: (value) => value ? formatShanghaiTime(value) : "长期" },
+    { title: "最后使用", dataIndex: "last_used_at", width: 190, render: (value) => formatShanghaiTime(value) },
     {
       title: "操作",
       width: 270,

@@ -123,9 +123,11 @@ def _script_version_out(row: ScriptVersion):
 
 def _script_asset_out(db: Session, row: ScriptAsset):
     version = current_script_version(db, row)
+    workspace = db.get(Workspace, row.workspace_id)
     return ScriptAssetOut(
         id=row.id,
         workspace_id=row.workspace_id,
+        workspace_name=workspace.name if workspace else "",
         task_id=row.task_id,
         current_version_id=row.current_version_id,
         current_version=version.version if version else None,

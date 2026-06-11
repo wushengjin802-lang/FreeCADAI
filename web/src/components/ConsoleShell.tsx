@@ -25,6 +25,13 @@ import { useConsoleStore } from "@/lib/store";
 const { Content, Sider } = Layout;
 const { Text, Title } = Typography;
 
+const roleLabel: Record<string, string> = {
+  owner: "拥有者",
+  admin: "管理员",
+  member: "成员",
+  viewer: "观察者"
+};
+
 export function ConsoleShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -50,6 +57,8 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
 
   const selectedKey = pathname?.includes("/console/members")
     ? "members"
+    : pathname?.includes("/console/settings")
+      ? "settings"
     : pathname?.includes("/console/usage")
       ? "usage"
     : pathname?.includes("/console/billing")
@@ -97,7 +106,7 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
             { key: "plugin", icon: <ApiOutlined />, label: "插件接入", onClick: () => router.push(routePath("/console/plugin")) },
             { key: "apiKeys", icon: <KeyOutlined />, label: "API Key", onClick: () => router.push(routePath("/console/api-keys")) },
             { key: "members", icon: <TeamOutlined />, label: "成员管理", onClick: () => router.push(routePath("/console/members")) },
-            { key: "settings", icon: <SettingOutlined />, label: "工作区设置", disabled: true }
+            { key: "settings", icon: <SettingOutlined />, label: "工作区设置", onClick: () => router.push(routePath("/console/settings")) }
           ]}
         />
       </Sider>
@@ -109,7 +118,7 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
             </Title>
             <Space size={8} wrap>
               <Text className="muted">{user?.display_name || user?.email || "未登录用户"}</Text>
-              {selectedWorkspace ? <Tag color="green">{selectedWorkspace.role}</Tag> : null}
+              {selectedWorkspace ? <Tag color="green">{roleLabel[selectedWorkspace.role] || selectedWorkspace.role}</Tag> : null}
             </Space>
           </Space>
           <Space wrap>

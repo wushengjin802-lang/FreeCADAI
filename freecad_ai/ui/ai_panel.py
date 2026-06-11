@@ -118,12 +118,12 @@ class AIPanel(QtWidgets.QDockWidget):
         body = QtWidgets.QWidget()
         root = QtWidgets.QVBoxLayout(body)
 
-        title = QtWidgets.QLabel("AI 智能工作台 - 阶段 4")
+        title = QtWidgets.QLabel("AI 智能工作台")
         title.setStyleSheet("font-weight: 600; font-size: 15px;")
         root.addWidget(title)
 
         description = QtWidgets.QLabel(
-            "支持本地直连或云端 SaaS 生成脚本、自动校验、自动修复，并在当前 FreeCAD 文档中执行。"
+            "支持本地直连或企业云端生成脚本、自动校验、自动修复，并在当前 FreeCAD 文档中执行。"
         )
         description.setWordWrap(True)
         root.addWidget(description)
@@ -274,7 +274,7 @@ class AIPanel(QtWidgets.QDockWidget):
         mode_form = QtWidgets.QFormLayout()
         self.service_mode_combo = QtWidgets.QComboBox()
         self.service_mode_combo.addItem("本地直连 LLM", "local")
-        self.service_mode_combo.addItem("云端 SaaS 服务", "cloud")
+        self.service_mode_combo.addItem("企业云端服务", "cloud")
         current_mode = self.config.get("service_mode", "local")
         index = self.service_mode_combo.findData(current_mode)
         if index >= 0:
@@ -301,21 +301,22 @@ class AIPanel(QtWidgets.QDockWidget):
         local_layout.addLayout(form)
         layout.addWidget(self.local_settings_group)
 
-        self.cloud_settings_group, cloud_layout = self._section_group("云端 SaaS 连接设置")
+        self.cloud_settings_group, cloud_layout = self._section_group("企业云端连接")
         cloud_form = QtWidgets.QFormLayout()
         self.cloud_base_url_input = QtWidgets.QLineEdit(self.config.get("cloud_base_url", ""))
-        self.cloud_api_key_input = QtWidgets.QLineEdit(self.config.get("cloud_api_key", ""))
-        self.cloud_api_key_input.setEchoMode(QtWidgets.QLineEdit.Password)
+        self._cloud_api_key_value = self.config.get("cloud_api_key", "")
+        self.cloud_api_key_input = QtWidgets.QLineEdit(self._mask_secret(self._cloud_api_key_value))
+        self.cloud_api_key_input.setPlaceholderText("在企业平台 API Key 页面创建后粘贴完整 Key")
         self.cloud_project_id_input = QtWidgets.QLineEdit(self.config.get("cloud_project_id", ""))
-        self.cloud_sync_history_checkbox = QtWidgets.QCheckBox("执行后回传结果")
+        self.cloud_sync_history_checkbox = QtWidgets.QCheckBox("执行后回传结果和模型信息")
         self.cloud_sync_history_checkbox.setChecked(bool(self.config.get("cloud_sync_history", True)))
-        cloud_form.addRow("SaaS Base URL（必填）", self.cloud_base_url_input)
-        cloud_form.addRow("SaaS API Key（必填，绑定后自动写入）", self.cloud_api_key_input)
-        cloud_form.addRow("Project ID（选填）", self.cloud_project_id_input)
-        cloud_form.addRow("云端同步（选填）", self.cloud_sync_history_checkbox)
+        cloud_form.addRow("服务地址（必填）", self.cloud_base_url_input)
+        cloud_form.addRow("插件 API Key（平台创建后粘贴）", self.cloud_api_key_input)
+        cloud_form.addRow("项目名称（选填）", self.cloud_project_id_input)
+        cloud_form.addRow("结果回传", self.cloud_sync_history_checkbox)
         cloud_layout.addLayout(cloud_form)
 
-        cloud_layout.addWidget(self._section_title("云端账号与工作区绑定"))
+        cloud_layout.addWidget(self._section_title("企业账号与工作区"))
         account_form = QtWidgets.QFormLayout()
         self.cloud_account_username_input = QtWidgets.QLineEdit(self.config.get("cloud_account_username", ""))
         self.cloud_account_password_input = QtWidgets.QLineEdit("")
@@ -323,40 +324,48 @@ class AIPanel(QtWidgets.QDockWidget):
         self.cloud_workspace_combo = QtWidgets.QComboBox()
         saved_workspace_id = str(self.config.get("cloud_workspace_id", "") or "")
         saved_workspace_name = self.config.get("cloud_workspace_name", "")
+        self.cloud_workspace_map = {}
         if saved_workspace_id:
+            self.cloud_workspace_map[saved_workspace_id] = {
+                "id": saved_workspace_id,
+                "name": saved_workspace_name,
+                "plan": self.config.get("cloud_workspace_plan", ""),
+                "status": self.config.get("cloud_workspace_status", ""),
+            }
             self.cloud_workspace_combo.addItem(
-                "{} - {}".format(saved_workspace_id, saved_workspace_name or "已绑定工作区"),
+                "{} - {}".format(saved_workspace_id, saved_workspace_name or "已保存工作区"),
                 saved_workspace_id,
             )
-        account_form.addRow("账号用户名（必填）", self.cloud_account_username_input)
-        account_form.addRow("账号密码（必填）", self.cloud_account_password_input)
-        account_form.addRow("绑定工作区（必选）", self.cloud_workspace_combo)
+        account_form.addRow("企业邮箱（必填）", self.cloud_account_username_input)
+        account_form.addRow("登录密码（必填）", self.cloud_account_password_input)
+        account_form.addRow("工作区（必选）", self.cloud_workspace_combo)
         cloud_layout.addLayout(account_form)
 
         account_row = QtWidgets.QHBoxLayout()
-        self.cloud_login_button = QtWidgets.QPushButton("1 登录账号")
-        self.cloud_login_button.setToolTip("使用云端账号登录，获得可访问的工作区列表权限。")
+        self.cloud_login_button = QtWidgets.QPushButton("登录企业账号")
+        self.cloud_login_button.setToolTip("使用企业平台账号登录，读取可访问的工作区。")
         self.cloud_login_button.clicked.connect(self._cloud_account_login)
         account_row.addWidget(self.cloud_login_button)
 
-        self.cloud_refresh_workspaces_button = QtWidgets.QPushButton("2 刷新工作区")
+        self.cloud_refresh_workspaces_button = QtWidgets.QPushButton("刷新工作区")
         self.cloud_refresh_workspaces_button.setToolTip("登录成功后读取当前账号可用的工作区。")
         self.cloud_refresh_workspaces_button.clicked.connect(self._cloud_refresh_workspaces)
         account_row.addWidget(self.cloud_refresh_workspaces_button)
 
-        self.cloud_bind_workspace_button = QtWidgets.QPushButton("3 绑定并生成 Key")
-        self.cloud_bind_workspace_button.setToolTip("为选中的工作区创建插件 API Key，并自动写入 SaaS API Key。")
-        self.cloud_bind_workspace_button.clicked.connect(self._cloud_bind_workspace)
+        self.cloud_bind_workspace_button = QtWidgets.QPushButton("保存工作区")
+        self.cloud_bind_workspace_button.setToolTip("保存当前选择的企业工作区。API Key 请在企业平台创建后粘贴。")
+        self.cloud_bind_workspace_button.clicked.connect(self._cloud_save_selected_workspace)
         account_row.addWidget(self.cloud_bind_workspace_button)
 
-        self.cloud_verify_button = QtWidgets.QPushButton("4 检查连接")
-        self.cloud_verify_button.setToolTip("验证当前 SaaS Base URL 和 SaaS API Key 是否可用。")
+        self.cloud_verify_button = QtWidgets.QPushButton("检查连接")
+        self.cloud_verify_button.setToolTip("验证当前服务地址和插件 API Key 是否可用。")
         self.cloud_verify_button.clicked.connect(self._cloud_verify_connection)
         account_row.addWidget(self.cloud_verify_button)
         cloud_layout.addLayout(account_row)
 
         self.cloud_operation_message_label = QtWidgets.QLabel("")
         self.cloud_operation_message_label.setWordWrap(True)
+        self.cloud_operation_message_label.setMaximumHeight(44)
         self.cloud_operation_message_label.setStyleSheet("color: #555;")
         cloud_layout.addWidget(self.cloud_operation_message_label)
 
@@ -370,11 +379,11 @@ class AIPanel(QtWidgets.QDockWidget):
         self.save_settings_button.clicked.connect(self._save_settings)
         layout.addWidget(self.save_settings_button)
 
-        layout.addWidget(self._section_title("设置说明"))
+        layout.addWidget(self._section_title("使用说明"))
         note = QtWidgets.QLabel(
             "本地直连 LLM：选择该模式后填写 Base URL、API Key、Model、Temperature，保存后生成会直接调用本地配置的模型服务。\n"
-            "云端 SaaS：必填 SaaS Base URL；推荐流程是 1 登录账号 -> 2 刷新工作区 -> 3 选择工作区并绑定生成 Key -> 4 检查连接 -> 保存设置。\n"
-            "Project ID 为选填，仅用于云端任务归类或后台检索；也可以手动填写 SaaS API Key 后直接检查连接。"
+            "企业云端：填写服务地址后，登录企业账号刷新工作区并保存；然后到企业平台 API Key 页面创建带过期时间和权限范围的插件 Key，粘贴到这里后检查连接。\n"
+            "项目名称为选填，用于云端任务归类和后续检索。已保存的插件 API Key 仅显示前后几位，中间会自动隐藏。"
         )
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -397,13 +406,13 @@ class AIPanel(QtWidgets.QDockWidget):
 
     def _current_settings(self):
         return {
-            "service_mode": self.service_mode_combo.currentData() or "local",
+            "service_mode": self._selected_service_mode(),
             "base_url": self.base_url_input.text().strip(),
             "api_key": self.api_key_input.text().strip(),
             "model": self.model_input.text().strip(),
             "temperature": self.temperature_input.value(),
             "cloud_base_url": self.cloud_base_url_input.text().strip(),
-            "cloud_api_key": self.cloud_api_key_input.text().strip(),
+            "cloud_api_key": self._cloud_api_key_from_input(),
             "cloud_project_id": self.cloud_project_id_input.text().strip(),
             "cloud_sync_history": self.cloud_sync_history_checkbox.isChecked(),
             "cloud_account_token": self.config.get("cloud_account_token", ""),
@@ -417,8 +426,11 @@ class AIPanel(QtWidgets.QDockWidget):
 
     def _save_settings(self):
         self.config = save_config(self._current_settings())
+        self._cloud_api_key_value = self.config.get("cloud_api_key", "")
+        self._refresh_cloud_api_key_display()
+        self._update_cloud_binding_status()
         self._update_service_mode_settings_visibility()
-        mode_name = "云端 SaaS 服务" if self._using_cloud() else "本地直连 LLM"
+        mode_name = "企业云端服务" if self._using_cloud() else "本地直连 LLM"
         self._set_status("设置已保存。下一次生成会使用：{}。".format(mode_name))
 
     def _update_service_mode_settings_visibility(self):
@@ -443,13 +455,60 @@ class AIPanel(QtWidgets.QDockWidget):
         if index >= 0:
             self.cloud_workspace_combo.setCurrentIndex(index)
 
+    def _mask_secret(self, secret):
+        secret = str(secret or "").strip()
+        if not secret:
+            return ""
+        if len(secret) <= 10:
+            return "{}{}".format(secret[:2], "*" * max(4, len(secret) - 2))
+        prefix_len = min(8, max(4, len(secret) // 5))
+        suffix_len = min(6, max(4, len(secret) // 6))
+        hidden_len = max(6, len(secret) - prefix_len - suffix_len)
+        return "{}{}{}".format(secret[:prefix_len], "*" * hidden_len, secret[-suffix_len:])
+
+    def _cloud_api_key_from_input(self):
+        if not hasattr(self, "cloud_api_key_input"):
+            return self.config.get("cloud_api_key", "")
+        text = self.cloud_api_key_input.text().strip()
+        current = getattr(self, "_cloud_api_key_value", self.config.get("cloud_api_key", ""))
+        if not text:
+            return ""
+        if current and ("*" in text or text == self._mask_secret(current)):
+            return current
+        return text
+
+    def _refresh_cloud_api_key_display(self):
+        if not hasattr(self, "cloud_api_key_input"):
+            return
+        current = getattr(self, "_cloud_api_key_value", self.config.get("cloud_api_key", ""))
+        self.cloud_api_key_input.setText(self._mask_secret(current))
+
+    def _cloud_plan_label(self, plan):
+        labels = {
+            "free": "免费版",
+            "pro": "专业版",
+            "team": "团队版",
+            "enterprise": "企业版",
+        }
+        return labels.get(str(plan or "").lower(), plan or "未知")
+
+    def _cloud_status_label(self, status):
+        labels = {
+            "active": "正常",
+            "disabled": "已停用",
+            "suspended": "已暂停",
+            "expired": "已过期",
+            "revoked": "已撤销",
+        }
+        return labels.get(str(status or "").lower(), status or "未知")
+
     def _workspace_label(self, workspace):
         parts = [str(workspace.get("id", "")), workspace.get("name", "")]
         detail = []
         if workspace.get("plan"):
-            detail.append(workspace.get("plan"))
+            detail.append(self._cloud_plan_label(workspace.get("plan")))
         if workspace.get("status"):
-            detail.append(workspace.get("status"))
+            detail.append(self._cloud_status_label(workspace.get("status")))
         label = " - ".join([part for part in parts if part])
         if detail:
             label = "{} ({})".format(label, " / ".join(detail))
@@ -477,29 +536,30 @@ class AIPanel(QtWidgets.QDockWidget):
         workspace_plan = self.config.get("cloud_workspace_plan", "")
         workspace_status = self.config.get("cloud_workspace_status", "")
         key_status = self.config.get("cloud_key_status", "")
-        api_key_status = "已配置" if self.cloud_api_key_input.text().strip() else "未配置"
-        account_status = "已登录：{}".format(username) if self.config.get("cloud_account_token") else "未登录云端账号"
-        workspace_status_text = "未绑定工作区"
+        api_key_status = "已配置" if self._cloud_api_key_from_input() else "未配置"
+        account_status = "已登录：{}".format(username) if self.config.get("cloud_account_token") else "未登录企业账号"
+        workspace_status_text = "未保存工作区"
         if workspace_id:
             workspace_status_text = "{} {}".format(workspace_id, workspace_name or "").strip()
         lines = [
-            "账号状态：{}".format(account_status),
+            "企业账号：{}".format(account_status),
             "当前工作区：{}".format(workspace_status_text),
-            "套餐/状态：{} / {}".format(workspace_plan or "未知", workspace_status or "未知"),
-            "插件 API Key：{}，Key 状态：{}".format(api_key_status, key_status or "未知"),
+            "工作区套餐：{}，状态：{}".format(self._cloud_plan_label(workspace_plan), self._cloud_status_label(workspace_status)),
+            "插件 API Key：{}，Key 状态：{}".format(api_key_status, self._cloud_status_label(key_status)),
         ]
         self.cloud_binding_status_label.setText("\n".join(lines))
 
     def _set_cloud_operation_message(self, text):
         if hasattr(self, "cloud_operation_message_label"):
             self.cloud_operation_message_label.setText(text)
+            self.cloud_operation_message_label.setToolTip(text)
         self._set_status(text)
 
     def _cloud_account_login(self):
         username = self.cloud_account_username_input.text().strip()
         password = self.cloud_account_password_input.text()
         if not username or not password:
-            self._set_cloud_operation_message("登录账号需要填写账号用户名和账号密码。")
+            self._set_cloud_operation_message("请填写企业邮箱和登录密码。")
             return
         self._save_settings()
 
@@ -509,12 +569,12 @@ class AIPanel(QtWidgets.QDockWidget):
             self.config = save_config(self.config)
             self.cloud_account_password_input.clear()
             self._update_cloud_binding_status()
-            self._set_cloud_operation_message("账号登录成功。下一步请刷新工作区列表，再选择要绑定的工作区。")
+            self._set_cloud_operation_message("企业账号登录成功。请刷新工作区列表，然后选择要连接的工作区。")
 
-        self._set_cloud_operation_message("正在登录云端账号，请稍候...")
+        self._set_cloud_operation_message("正在登录企业账号，请稍候...")
         self._start_background_task(
-            "云端账号登录",
-            "正在登录云端账号，请稍候...",
+            "企业账号登录",
+            "正在登录企业账号，请稍候...",
             lambda: self._build_cloud_client().account_login(username, password),
             on_success,
             lambda error: self._set_cloud_operation_message(format_cloud_error(error)),
@@ -525,20 +585,23 @@ class AIPanel(QtWidgets.QDockWidget):
         self._save_settings()
         token = self.config.get("cloud_account_token", "")
         if not token:
-            self._set_cloud_operation_message("请先点击“1 登录账号”，登录成功后再刷新工作区。")
+            self._set_cloud_operation_message("请先登录企业账号，登录成功后再刷新工作区。")
             return
 
         def on_success(payload):
             workspaces = payload.get("workspaces", [])
             current_id = self._selected_cloud_workspace_id()
             self.cloud_workspace_combo.clear()
+            self.cloud_workspace_map = {}
             for workspace in workspaces:
-                self.cloud_workspace_combo.addItem(self._workspace_label(workspace), str(workspace.get("id", "")))
+                workspace_id = str(workspace.get("id", ""))
+                self.cloud_workspace_map[workspace_id] = workspace
+                self.cloud_workspace_combo.addItem(self._workspace_label(workspace), workspace_id)
             self._select_cloud_workspace(current_id)
             if not current_id and workspaces:
                 self.cloud_workspace_combo.setCurrentIndex(0)
             self._update_cloud_binding_status()
-            self._set_cloud_operation_message("工作区列表已刷新，共找到 {} 个工作区。下一步请选择工作区并绑定。".format(len(workspaces)))
+            self._set_cloud_operation_message("工作区列表已刷新，共找到 {} 个工作区。请选择工作区并保存，然后粘贴企业平台创建的插件 API Key。".format(len(workspaces)))
 
         self._set_cloud_operation_message("正在从云端读取可用工作区...")
         self._start_background_task(
@@ -550,50 +613,38 @@ class AIPanel(QtWidgets.QDockWidget):
             button=self.cloud_refresh_workspaces_button,
         )
 
-    def _cloud_bind_workspace(self):
+    def _cloud_save_selected_workspace(self):
         self._save_settings()
         token = self.config.get("cloud_account_token", "")
         workspace_id = self._selected_cloud_workspace_id()
         if not token:
-            self._set_cloud_operation_message("请先点击“1 登录账号”，登录成功后再绑定工作区。")
+            self._set_cloud_operation_message("请先登录企业账号，登录成功后再保存工作区。")
             return
         if not workspace_id:
-            self._set_cloud_operation_message("请先在“绑定工作区”下拉框中选择一个工作区。")
+            self._set_cloud_operation_message("请先在“工作区”下拉框中选择一个工作区。")
             return
-        username = self.config.get("cloud_account_username", "") or self.cloud_account_username_input.text().strip()
-        key_name = "FreeCADAI Plugin"
-        if username:
-            key_name = "{} - {}".format(key_name, username)
-
-        def on_success(payload):
-            api_key = payload.get("api_key", "")
-            workspace = payload.get("workspace", {})
-            if api_key:
-                self.cloud_api_key_input.setText(api_key)
-                self.config["cloud_api_key"] = api_key
-            self.config["cloud_key_status"] = "active"
-            self._remember_cloud_workspace(workspace)
-            self.config = save_config(self._current_settings())
-            self.service_mode_combo.setCurrentIndex(max(0, self.service_mode_combo.findData("cloud")))
-            self.config["service_mode"] = "cloud"
-            self.config = save_config(self.config)
-            self._update_cloud_binding_status()
-            self._set_cloud_operation_message("工作区绑定完成，插件 API Key 已自动写入 SaaS API Key。下一步建议检查连接并保存设置。")
-
-        self._set_cloud_operation_message("正在为所选工作区创建插件 API Key...")
-        self._start_background_task(
-            "绑定工作区",
-            "正在为所选工作区创建插件 API Key...",
-            lambda: self._build_cloud_client().bind_workspace(token, workspace_id, key_name),
-            on_success,
-            lambda error: self._set_cloud_operation_message(format_cloud_error(error)),
-            button=self.cloud_bind_workspace_button,
-        )
+        workspace = getattr(self, "cloud_workspace_map", {}).get(workspace_id)
+        if not workspace:
+            workspace = {
+                "id": workspace_id,
+                "name": self.config.get("cloud_workspace_name", ""),
+                "plan": self.config.get("cloud_workspace_plan", ""),
+                "status": self.config.get("cloud_workspace_status", ""),
+            }
+        self._remember_cloud_workspace(workspace)
+        cloud_index = self.service_mode_combo.findData("cloud")
+        if cloud_index >= 0:
+            self.service_mode_combo.setCurrentIndex(cloud_index)
+        self.config = save_config(self._current_settings())
+        self._cloud_api_key_value = self.config.get("cloud_api_key", "")
+        self._refresh_cloud_api_key_display()
+        self._update_cloud_binding_status()
+        self._set_cloud_operation_message("工作区已保存。请在企业平台创建插件 API Key 后粘贴到这里，并点击“检查连接”。")
 
     def _cloud_verify_connection(self):
         self._save_settings()
         if not self.config.get("cloud_api_key", ""):
-            self._set_cloud_operation_message("请先绑定工作区生成 SaaS API Key，或手动填写 SaaS API Key 后再检查连接。")
+            self._set_cloud_operation_message("请先在企业平台 API Key 页面创建插件 Key，并粘贴到这里后再检查连接。")
             return
 
         def on_success(payload):
@@ -607,7 +658,7 @@ class AIPanel(QtWidgets.QDockWidget):
             self._remember_cloud_workspace(workspace)
             self.config = save_config(self._current_settings())
             self._update_cloud_binding_status()
-            self._set_cloud_operation_message("云端连接正常：当前工作区为 {}。".format(self.config.get("cloud_workspace_name") or self.config.get("cloud_workspace_id")))
+            self._set_cloud_operation_message("企业云端连接正常：当前工作区为 {}。".format(self.config.get("cloud_workspace_name") or self.config.get("cloud_workspace_id")))
 
         self._set_cloud_operation_message("正在检查云端连接和 API Key 状态...")
         self._start_background_task(
@@ -762,7 +813,7 @@ class AIPanel(QtWidgets.QDockWidget):
     def _sync_cloud_templates(self):
         self._save_settings()
         if not self._using_cloud():
-            self._set_status("请先在设置中选择“云端 SaaS 服务”，再同步云端模板。")
+            self._set_status("请先在设置中选择“企业云端服务”，再同步企业模板。")
             return
 
         def success(payload):
@@ -796,8 +847,41 @@ class AIPanel(QtWidgets.QDockWidget):
     def _modeling_mode(self):
         return self.modeling_mode_combo.currentData() or "3d_solid"
 
+    def _selected_service_mode(self):
+        if hasattr(self, "service_mode_combo"):
+            data = self.service_mode_combo.currentData()
+            if data in ("local", "cloud"):
+                return data
+            text = self.service_mode_combo.currentText().strip().lower()
+            if "云端" in text or "cloud" in text or "saas" in text:
+                return "cloud"
+            if "本地" in text or "local" in text:
+                return "local"
+        return self.config.get("service_mode", "local")
+
     def _using_cloud(self):
-        return self.config.get("service_mode", "local") == "cloud"
+        return self._selected_service_mode() == "cloud" or self.config.get("service_mode", "local") == "cloud"
+
+    def _validate_generation_settings(self):
+        if self._using_cloud():
+            if not self.config.get("cloud_base_url", ""):
+                self._set_status("企业云端服务地址不能为空。请在“设置”页填写服务地址后再生成。")
+                return False
+            if not self.config.get("cloud_api_key", ""):
+                self._set_status("插件 API Key 不能为空。请先在企业平台创建 API Key，粘贴到“设置”页并检查连接。")
+                return False
+            return True
+        if not self.config.get("base_url", ""):
+            self._set_status("本地直连 LLM 的 Base URL 不能为空。请在“设置”页填写后再生成。")
+            return False
+        if not self.config.get("api_key", ""):
+            self._set_status("本地直连 LLM 的 API Key 不能为空。当前如果要使用企业云端，请先在“设置”页选择“企业云端服务”。")
+            return False
+        if not self.config.get("model", ""):
+            self._set_status("本地直连 LLM 的 Model 不能为空。请在“设置”页填写后再生成。")
+            return False
+        return True
+
 
     def _provider_label(self):
         if self._using_cloud():
@@ -825,6 +909,8 @@ class AIPanel(QtWidgets.QDockWidget):
             return
 
         self._save_settings()
+        if not self._validate_generation_settings():
+            return
         self._clear_generation_outputs("已清空旧结果。正在整理需求、读取当前模型上下文，并准备调用 LLM...")
         try:
             context = collect_context()
@@ -833,7 +919,7 @@ class AIPanel(QtWidgets.QDockWidget):
             return
         if self._using_cloud():
             request_callback = lambda: self._request_cloud_generate(prompt, context)
-            task_message = "上下文已读取，正在后台请求云端 SaaS 生成 FreeCAD Python 脚本；界面可以继续操作。"
+            task_message = "上下文已读取，正在后台请求企业云端生成 FreeCAD Python 脚本；界面可以继续操作。"
         else:
             messages = build_generation_messages(prompt, context, self._modeling_mode())
             request_callback = lambda: self._request_payload(messages)
@@ -923,6 +1009,7 @@ class AIPanel(QtWidgets.QDockWidget):
             self.config.get("cloud_base_url", ""),
             self.config.get("cloud_api_key", ""),
             self.config.get("cloud_project_id", ""),
+            self.config.get("cloud_account_token", ""),
         )
         client.on_task_submitted = self._on_cloud_task_submitted
         client.should_cancel = lambda: self.cancel_cloud_task_requested
@@ -1064,6 +1151,8 @@ class AIPanel(QtWidgets.QDockWidget):
 
     def _start_auto_repair(self, failed_script, error):
         self._save_settings()
+        if not self._validate_generation_settings():
+            return
         try:
             prompt = self.prompt_box.toPlainText().strip()
             context = collect_context()
@@ -1072,7 +1161,7 @@ class AIPanel(QtWidgets.QDockWidget):
             return
         if self._using_cloud():
             request_callback = lambda: self._request_cloud_repair(prompt, context, failed_script, error)
-            task_message = "正在后台请求云端 SaaS 生成修复脚本，FreeCAD 界面可以继续操作。"
+            task_message = "正在后台请求企业云端生成修复脚本，FreeCAD 界面可以继续操作。"
         else:
             messages = build_repair_messages(prompt, context, failed_script, error, self._modeling_mode())
             request_callback = lambda: self._request_payload(messages)
@@ -1129,6 +1218,8 @@ class AIPanel(QtWidgets.QDockWidget):
             return
 
         self._save_settings()
+        if not self._validate_generation_settings():
+            return
         failed_script = self.last_failed_script
         last_error = self.last_error
         try:
@@ -1139,7 +1230,7 @@ class AIPanel(QtWidgets.QDockWidget):
             return
         if self._using_cloud():
             request_callback = lambda: self._request_cloud_repair(prompt, context, failed_script, last_error)
-            task_message = "正在后台请求云端 SaaS 修复失败脚本，FreeCAD 界面可以继续操作。"
+            task_message = "正在后台请求企业云端修复失败脚本，FreeCAD 界面可以继续操作。"
         else:
             messages = build_repair_messages(prompt, context, failed_script, last_error, self._modeling_mode())
             request_callback = lambda: self._request_payload(messages)
@@ -1191,6 +1282,8 @@ class AIPanel(QtWidgets.QDockWidget):
             return
 
         self._save_settings()
+        if not self._validate_generation_settings():
+            return
         self.summary_box.clear()
         self.script_box.clear()
         try:
@@ -1200,7 +1293,7 @@ class AIPanel(QtWidgets.QDockWidget):
             return
         if self._using_cloud():
             request_callback = lambda: self._request_cloud_regenerate(prompt, context, parameters_text)
-            task_message = "已读取编辑后的参数，正在后台请求云端 SaaS 重新生成脚本。"
+            task_message = "已读取编辑后的参数，正在后台请求企业云端重新生成脚本。"
         else:
             messages = build_regeneration_with_parameters_messages(
                 prompt,

@@ -1,6 +1,6 @@
 "use client";
 
-import { ApiOutlined, AppstoreOutlined, DatabaseOutlined, TeamOutlined } from "@ant-design/icons";
+import { ApiOutlined, AppstoreOutlined, DatabaseOutlined, FileTextOutlined, KeyOutlined, TeamOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Card, Col, Empty, Progress, Row, Space, Spin, Statistic, Typography } from "antd";
 import { useRouter } from "next/navigation";
@@ -63,7 +63,7 @@ export default function ConsoleHomePage() {
               <Text className="enterprise-kicker">Workspace</Text>
               <Title level={2}>{workspace.name}</Title>
               <Paragraph>
-                当前处于阶段 16 基础能力：企业账号、工作区成员和租户权限已独立于平台管理台。
+                在这里统一管理团队成员、FreeCAD 插件接入、生成任务、企业模板和模型资产。
               </Paragraph>
             </div>
             <Button type="primary" icon={<TeamOutlined />} onClick={() => router.push(routePath("/console/members"))}>
@@ -128,11 +128,20 @@ export default function ConsoleHomePage() {
               </Card>
             </Col>
             <Col xs={24} lg={10}>
-              <Card className="console-card" title="下一阶段入口">
-                <Space direction="vertical" size={12}>
-                  <Text>阶段 17：插件绑定与 API Key 自服务。</Text>
-                  <Text>阶段 18：用户任务中心与 Web 端生成。</Text>
-                  <Text>阶段 19：模板中心与资产库企业化。</Text>
+              <Card className="console-card" title="常用入口">
+                <Space direction="vertical" size={10} className="full-width">
+                  <Button block icon={<FileTextOutlined />} onClick={() => router.push(routePath("/console/tasks"))}>
+                    查看与提交生成任务
+                  </Button>
+                  <Button block icon={<AppstoreOutlined />} onClick={() => router.push(routePath("/console/templates"))}>
+                    管理企业模板
+                  </Button>
+                  <Button block icon={<DatabaseOutlined />} onClick={() => router.push(routePath("/console/assets/models"))}>
+                    上传与下载模型资产
+                  </Button>
+                  <Button block icon={<KeyOutlined />} onClick={() => router.push(routePath("/console/api-keys"))}>
+                    配置插件 API Key
+                  </Button>
                 </Space>
               </Card>
             </Col>

@@ -24,6 +24,7 @@ class GenerateRequest(BaseModel):
     context: str = ""
     modeling_mode: str = "3d_solid"
     project_id: str = ""
+    account_token: str = ""
 
 
 class RepairRequest(BaseModel):
@@ -33,6 +34,7 @@ class RepairRequest(BaseModel):
     error_text: str = Field(..., min_length=1)
     modeling_mode: str = "3d_solid"
     project_id: str = ""
+    account_token: str = ""
 
 
 class RegenerateRequest(BaseModel):
@@ -41,6 +43,7 @@ class RegenerateRequest(BaseModel):
     parameters: str = Field(..., min_length=1)
     modeling_mode: str = "3d_solid"
     project_id: str = ""
+    account_token: str = ""
 
 
 class GenerationResponse(BaseModel):

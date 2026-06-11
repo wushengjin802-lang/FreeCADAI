@@ -7,10 +7,10 @@ services:
     environment:
       FREECADAI_DATABASE_URL: "mysql+pymysql://myroot:hsi!_eTX62028195@119.29.16.170:3306/freecadai?charset=utf8mb4"
       FREECADAI_PLUGIN_API_KEY: dev-plugin-key
-      FREECADAI_LLM_BASE_URL: https://api.openai.com/v1
-      FREECADAI_LLM_API_KEY: ""
-      FREECADAI_LLM_MODEL: gpt-4.1-mini
-      FREECADAI_LLM_TEMPERATURE: "0.1"
+      FREECADAI_LLM_BASE_URL: "${FREECADAI_LLM_BASE_URL:-https://api.openai.com/v1}"
+      FREECADAI_LLM_API_KEY: "${FREECADAI_LLM_API_KEY:?FREECADAI_LLM_API_KEY is required}"
+      FREECADAI_LLM_MODEL: "${FREECADAI_LLM_MODEL:-gpt-4.1-mini}"
+      FREECADAI_LLM_TEMPERATURE: "${FREECADAI_LLM_TEMPERATURE:-0.1}"
       FREECADAI_REDIS_URL: "redis://:reDis2029%40hs@119.29.16.170:6379/0"
       FREECADAI_ADMIN_USERNAME: admin
       FREECADAI_ADMIN_PASSWORD: admin@123
@@ -26,10 +26,10 @@ services:
     environment:
       FREECADAI_DATABASE_URL: "mysql+pymysql://myroot:hsi!_eTX62028195@119.29.16.170:3306/freecadai?charset=utf8mb4"
       FREECADAI_PLUGIN_API_KEY: dev-plugin-key
-      FREECADAI_LLM_BASE_URL: https://api.openai.com/v1
-      FREECADAI_LLM_API_KEY: ""
-      FREECADAI_LLM_MODEL: gpt-4.1-mini
-      FREECADAI_LLM_TEMPERATURE: "0.1"
+      FREECADAI_LLM_BASE_URL: "${FREECADAI_LLM_BASE_URL:-https://api.openai.com/v1}"
+      FREECADAI_LLM_API_KEY: "${FREECADAI_LLM_API_KEY:?FREECADAI_LLM_API_KEY is required}"
+      FREECADAI_LLM_MODEL: "${FREECADAI_LLM_MODEL:-gpt-4.1-mini}"
+      FREECADAI_LLM_TEMPERATURE: "${FREECADAI_LLM_TEMPERATURE:-0.1}"
       FREECADAI_REDIS_URL: "redis://:reDis2029%40hs@119.29.16.170:6379/0"
       FREECADAI_ADMIN_USERNAME: admin
       FREECADAI_ADMIN_PASSWORD: admin@123

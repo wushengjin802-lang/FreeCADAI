@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ConsoleShell } from "@/components/ConsoleShell";
 import { consoleApi } from "@/lib/api";
+import { formatShanghaiTime } from "@/lib/format";
 import { routePath } from "@/lib/routes";
 import { useConsoleStore } from "@/lib/store";
 import type { ConsoleNotification } from "@/lib/types";
@@ -99,7 +100,7 @@ export default function ConsoleNotificationsPage() {
               >
                 <List.Item.Meta
                   title={<Space><Tag color={color(item.level)}>{item.level}</Tag><Text strong={item.status === "unread"}>{item.title}</Text><Tag>{item.status === "unread" ? "未读" : "已读"}</Tag></Space>}
-                  description={<Space direction="vertical" size={2}><Text>{item.body}</Text><Text className="muted">{item.created_at}</Text></Space>}
+                  description={<Space direction="vertical" size={2}><Text>{item.body}</Text><Text className="muted">{formatShanghaiTime(item.created_at)}</Text></Space>}
                 />
               </List.Item>
             )}
