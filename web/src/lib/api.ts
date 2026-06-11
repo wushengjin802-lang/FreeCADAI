@@ -158,7 +158,41 @@ export const consoleApi = {
   retryTask: (token: string, id: number) =>
     apiFetch<ConsoleTaskActionResponse>(`/api/v1/console/tasks/${id}/retry`, token, { method: "POST" }),
   templates: (token: string, workspaceId: number) =>
-    apiFetch<Template[]>(`/api/v1/console/templates${toQuery({ workspace_id: workspaceId })}`, token)
+    apiFetch<Template[]>(`/api/v1/console/templates${toQuery({ workspace_id: workspaceId })}`, token),
+  templateCenter: (token: string, params: { workspace_id: number; include_disabled?: boolean; q?: string }) =>
+    apiFetch<Template[]>(`/api/v1/console/templates${toQuery(params)}`, token),
+  createTemplate: (token: string, body: Omit<Template, "id">) =>
+    apiFetch<Template>("/api/v1/console/templates", token, { method: "POST", body: JSON.stringify(body) }),
+  updateTemplate: (token: string, id: number, body: Partial<Omit<Template, "id" | "workspace_id">>) =>
+    apiFetch<Template>(`/api/v1/console/templates/${id}`, token, { method: "PUT", body: JSON.stringify(body) }),
+  deleteTemplate: (token: string, id: number) =>
+    apiFetch<{ ok: boolean }>(`/api/v1/console/templates/${id}`, token, { method: "DELETE" }),
+  importTemplates: (token: string, templates: Array<Omit<Template, "id">>) =>
+    apiFetch<Template[]>("/api/v1/console/templates/import", token, { method: "POST", body: JSON.stringify({ templates }) }),
+  exportTemplates: (token: string, workspaceId: number) =>
+    apiFetch<Template[]>(`/api/v1/console/templates/export${toQuery({ workspace_id: workspaceId })}`, token),
+  scriptAssets: (token: string, params: { workspace_id: number; q?: string; favorite?: boolean | null; status?: string }) =>
+    apiFetch<ScriptAsset[]>(`/api/v1/console/script-assets${toQuery(params)}`, token),
+  scriptVersions: (token: string, assetId: number) =>
+    apiFetch<ScriptVersion[]>(`/api/v1/console/script-assets/${assetId}/versions`, token),
+  updateScriptAsset: (token: string, id: number, body: Partial<Pick<ScriptAsset, "name" | "description" | "favorite" | "status" | "tags" | "metadata">>) =>
+    apiFetch<ScriptAsset>(`/api/v1/console/script-assets/${id}`, token, { method: "PUT", body: JSON.stringify(body) }),
+  favoriteScriptAsset: (token: string, id: number) =>
+    apiFetch<ScriptAsset>(`/api/v1/console/script-assets/${id}/favorite`, token, { method: "POST" }),
+  copyScriptAsset: (token: string, id: number) =>
+    apiFetch<ScriptAsset>(`/api/v1/console/script-assets/${id}/copy`, token, { method: "POST" }),
+  rollbackScriptAsset: (token: string, id: number, versionId: number) =>
+    apiFetch<ScriptAsset>(`/api/v1/console/script-assets/${id}/rollback`, token, { method: "POST", body: JSON.stringify({ version_id: versionId }) }),
+  reuseScriptAssetTemplate: (token: string, id: number, body: { name?: string; category: string; workspace_id?: number | null }) =>
+    apiFetch<Template>(`/api/v1/console/script-assets/${id}/reuse-template`, token, { method: "POST", body: JSON.stringify(body) }),
+  modelAssets: (token: string, params: { workspace_id: number; q?: string; status?: string }) =>
+    apiFetch<ModelAsset[]>(`/api/v1/console/model-assets${toQuery(params)}`, token),
+  createModelAsset: (token: string, body: Omit<ModelAsset, "id" | "created_at" | "updated_at">) =>
+    apiFetch<ModelAsset>("/api/v1/console/model-assets", token, { method: "POST", body: JSON.stringify(body) }),
+  updateModelAsset: (token: string, id: number, body: Partial<Omit<ModelAsset, "id" | "workspace_id" | "created_at" | "updated_at">>) =>
+    apiFetch<ModelAsset>(`/api/v1/console/model-assets/${id}`, token, { method: "PUT", body: JSON.stringify(body) }),
+  deleteModelAsset: (token: string, id: number) =>
+    apiFetch<{ ok: boolean }>(`/api/v1/console/model-assets/${id}`, token, { method: "DELETE" })
 };
 
 export const adminApi = {

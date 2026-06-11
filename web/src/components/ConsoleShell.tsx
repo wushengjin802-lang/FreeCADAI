@@ -3,6 +3,8 @@
 import {
   AppstoreOutlined,
   ApiOutlined,
+  CodeOutlined,
+  DatabaseOutlined,
   FileTextOutlined,
   KeyOutlined,
   LogoutOutlined,
@@ -44,6 +46,12 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
 
   const selectedKey = pathname?.includes("/console/members")
     ? "members"
+    : pathname?.includes("/console/assets/scripts")
+      ? "scriptAssets"
+    : pathname?.includes("/console/assets/models")
+      ? "modelAssets"
+    : pathname?.includes("/console/templates")
+      ? "templates"
     : pathname?.includes("/console/tasks")
       ? "tasks"
     : pathname?.includes("/console/plugin")
@@ -67,6 +75,9 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
           items={[
             { key: "overview", icon: <AppstoreOutlined />, label: "工作区概览", onClick: () => router.push(routePath("/console")) },
             { key: "tasks", icon: <FileTextOutlined />, label: "任务中心", onClick: () => router.push(routePath("/console/tasks")) },
+            { key: "templates", icon: <AppstoreOutlined />, label: "模板中心", onClick: () => router.push(routePath("/console/templates")) },
+            { key: "scriptAssets", icon: <CodeOutlined />, label: "脚本资产", onClick: () => router.push(routePath("/console/assets/scripts")) },
+            { key: "modelAssets", icon: <DatabaseOutlined />, label: "模型资产", onClick: () => router.push(routePath("/console/assets/models")) },
             { key: "plugin", icon: <ApiOutlined />, label: "插件接入", onClick: () => router.push(routePath("/console/plugin")) },
             { key: "apiKeys", icon: <KeyOutlined />, label: "API Key", onClick: () => router.push(routePath("/console/api-keys")) },
             { key: "members", icon: <TeamOutlined />, label: "成员管理", onClick: () => router.push(routePath("/console/members")) },
