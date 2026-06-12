@@ -1,6 +1,7 @@
 """Enterprise/user console API for phase 16."""
 
 import secrets
+import sys
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
@@ -342,10 +343,26 @@ def _can_manage_asset(db: Session, user_id: int, member: WorkspaceMember, asset:
     return member.role in CONSOLE_WRITE_ROLES or _asset_created_by_user_id(db, asset) == user_id
 
 
-def _audit(db: Session, action: str, target_type: str, target_id="", workspace_id=None, metadata=None):
+def _audit(db: Session, action: str, target_type: str, target_id="", workspace_id=None, metadata=None, actor=None):
+    # 从调用栈查找 user 变量（强制覆盖 ContextVar，保证可靠性）
+    frame = sys._getframe(1)
+    while frame:
+        caller_user = frame.f_locals.get("user")
+        if caller_user and isinstance(caller_user, dict) and caller_user.get("id"):
+            actor = caller_user["email"]
+            break
+        # 对于 logout 等没有 user 的场景，找 session 然后查用户邮箱
+        caller_session = frame.f_locals.get("session")
+        if caller_session and hasattr(caller_session, "user_id"):
+            user_obj = db.get(User, caller_session.user_id)
+            actor = user_obj.email if user_obj else str(caller_session.user_id)
+            break
+        frame = frame.f_back
+    if not actor:
+        actor = current_user_actor()
     db.add(
         AuditLog(
-            actor=current_user_actor(),
+            actor=actor,
             action=action,
             target_type=target_type,
             target_id=str(target_id or ""),
@@ -413,7 +430,7 @@ def register(payload: ConsoleRegisterRequest, db: Session = Depends(get_db)):
     db.add(member)
     db.add(
         AuditLog(
-            actor="user:{}".format(user.id),
+            actor=user.email,
             action="console.user.register",
             target_type="user",
             target_id=str(user.id),
@@ -441,7 +458,7 @@ def login(payload: ConsoleLoginRequest, db: Session = Depends(get_db)):
     token, session = create_user_session(db, user)
     db.add(
         AuditLog(
-            actor="user:{}".format(user.id),
+            actor=user.email,
             action="console.user.login",
             target_type="user",
             target_id=str(user.id),
@@ -1762,7 +1779,7 @@ def accept_invite(invite_token: str, payload: ConsoleRegisterRequest, db: Sessio
     invite.accepted_at = now
     db.add(
         AuditLog(
-            actor="user:{}".format(user.id),
+            actor=user.email,
             action="console.workspace.invite.accept",
             target_type="workspace_invite",
             target_id=str(invite.id),

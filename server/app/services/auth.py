@@ -201,7 +201,7 @@ def authenticate_user(db: Session = Depends(get_db), authorization: str = Header
     if user is None or user.status != "active":
         raise HTTPException(status_code=403, detail="User is not active.")
     principal = {"id": user.id, "email": user.email, "display_name": user.display_name, "status": user.status}
-    _user_actor.set("user:{}".format(user.id))
+    _user_actor.set(user.email)
     _user_principal.set(principal)
     return principal
 
